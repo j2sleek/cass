@@ -1,0 +1,108 @@
+/* See the Tailwind configuration guide for advanced usage
+   https://tailwindcss.com/docs/configuration */
+
+@import "tailwindcss" source(none);
+@import "phoenix-colocated/cass/colocated.css";
+@source "../css";
+@source "../js";
+@source "../../lib/cass_web";
+/* Required for Tailwind to automatically pick up changes in colocated CSS files in dev */
+@source "../../_build/dev/phoenix-colocated/cass/*/";
+
+/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
+   The heroicons installation itself is managed by your mix.exs */
+@plugin "../vendor/heroicons";
+
+/* CASS brand design tokens. Colors are exposed as Tailwind utilities such
+   as bg-brand-600, text-accent-700, etc. */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --color-brand-50: #f3f4ff;
+  --color-brand-100: #e4e6ff;
+  --color-brand-200: #cfd3ff;
+  --color-brand-300: #acb2ff;
+  --color-brand-400: #8288fb;
+  --color-brand-500: #5b5ef6;
+  --color-brand-600: #4643eb;
+  --color-brand-700: #3b34d0;
+  --color-brand-800: #312da8;
+  --color-brand-900: #2c2b85;
+  --color-brand-950: #1a1a4e;
+
+  --color-accent-50: #f0fdfa;
+  --color-accent-100: #ccfbf1;
+  --color-accent-200: #99f6e4;
+  --color-accent-300: #5eead4;
+  --color-accent-400: #2dd4bf;
+  --color-accent-500: #14b8a6;
+  --color-accent-600: #0d9488;
+  --color-accent-700: #0f766e;
+  --color-accent-800: #115e59;
+  --color-accent-900: #134e4a;
+  --color-accent-950: #042f2a;
+}
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* Use the data attribute for dark mode */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* Base typography and surfaces */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: #ffffff;
+    color: #171722;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  html[data-theme="dark"] body {
+    background-color: #0b0b14;
+    color: #e7e7f0;
+  }
+
+  ::selection {
+    background-color: #4643eb;
+    color: #ffffff;
+  }
+}
+
+/* Subtle grid/glow helpers used by the storefront hero */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(59 52 208 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(59 52 208 / 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+html[data-theme="dark"] .bg-grid {
+  background-image:
+    linear-gradient(to right, rgb(200 200 255 / 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(200 200 255 / 0.04) 1px, transparent 1px);
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
