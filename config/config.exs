@@ -7,10 +7,35 @@
 # General application configuration
 import Config
 
+# Password hashing for `Cass.Accounts`. PBKDF2-HMAC-SHA512 with 160_000 rounds,
+# which is in line with the OWASP recommendation for PBKDF2-HMAC-SHA512
+# (210_000). `config/test.exs` lowers the cost for the test suite only.
+# See docs/security.md for the full rationale.
+config :pbkdf2_elixir, rounds: 160_000
+
+# The authentication scope used by `CassWeb.UserAuth`. Roles/authorization
+# fields are deliberately absent in Milestone 3 Phase 1: the scope only carries
+# the resolved user, and it is resolved server-side, never from the request.
+config :cass, :scopes,
+  user: [
+    default: true,
+    module: Cass.Accounts.Scope,
+    assign_key: :current_scope,
+    access_path: [:user, :id],
+    schema_key: :user_id,
+    schema_type: :id,
+    schema_table: :cass_users,
+    test_data_fixture: Cass.AccountsFixtures,
+    test_setup_helper: :register_and_log_in_user
+  ]
+
 config :cass,
   ecto_repos: [Cass.Repo],
   generators: [timestamp_type: :utc_datetime],
-  environment: config_env()
+  environment: config_env(),
+  # Auth cookies (session + "remember me") are only marked `secure` in
+  # production, where the endpoint forces HTTPS. Overridden in config/prod.exs.
+  secure_cookies: false
 
 # Configure the endpoint
 config :cass, CassWeb.Endpoint,

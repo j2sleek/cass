@@ -4,11 +4,22 @@ defmodule CassWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
+  #
+  # The session only ever carries an opaque, random session token (never a user
+  # id and never an authorization decision), and it is HttpOnly so scripts
+  # cannot read it. `SameSite=Lax` is what makes the session survive ordinary
+  # top-level navigation from another site while still blocking cross-site
+  # POSTs, which is what the CSRF token is there to catch. The cookie is marked
+  # `secure` in production (`:secure_cookies`, see `config/prod.exs`), which is
+  # required by Phoenix to protect against a session fixation attack over plain
+  # HTTP.
   @session_options [
     store: :cookie,
     key: "_cass_key",
     signing_salt: "swgMDDOm",
-    same_site: "Lax"
+    same_site: "Lax",
+    http_only: true,
+    secure: Application.compile_env(:cass, :secure_cookies, false)
   ]
 
   socket "/live", Phoenix.LiveView.Socket,

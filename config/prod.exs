@@ -19,6 +19,9 @@ config :cass, CassWeb.Endpoint,
     ]
   ]
 
+# Serve auth cookies (session and "remember me") over HTTPS only.
+config :cass, :secure_cookies, true
+
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req
 

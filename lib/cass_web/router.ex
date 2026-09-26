@@ -1,6 +1,8 @@
 defmodule CassWeb.Router do
   use CassWeb, :router
 
+  import CassWeb.UserAuth
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -8,20 +10,47 @@ defmodule CassWeb.Router do
     plug :put_root_layout, html: {CassWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug :fetch_current_scope_for_user
   end
 
   pipeline :api do
     plug :accepts, ["json"]
   end
 
+  ## Public browsing: the catalog and the authentication entry points.
+
   scope "/", CassWeb do
     pipe_through :browser
 
     get "/", PageController, :home
 
-    live "/catalog", CatalogLive
-    live "/catalog/categories/:slug", CategoryLive
-    live "/catalog/products/:slug", ProductLive
+    live_session :current_user, on_mount: [{CassWeb.UserAuth, :mount_current_scope}] do
+      live "/catalog", CatalogLive
+      live "/catalog/categories/:slug", CategoryLive
+      live "/catalog/products/:slug", ProductLive
+
+      live "/users/register", UserRegistrationLive
+      live "/users/log-in", UserLoginLive
+      live "/users/reset-password", UserForgotPasswordLive
+      live "/users/reset-password/:token", UserResetPasswordLive
+    end
+
+    post "/users/log-in", UserSessionController, :create
+    delete "/users/log-out", UserSessionController, :delete
+    get "/users/confirm/:token", UserConfirmationController, :show
+  end
+
+  ## Signed-in only.
+
+  scope "/", CassWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :require_authenticated_user,
+      on_mount: [{CassWeb.UserAuth, :require_authenticated}] do
+      live "/users/settings", UserSettingsLive
+    end
+
+    get "/users/settings/confirm-email/:token", UserConfirmationController, :confirm_email
   end
 
   scope "/api/v1", CassWeb.Api.V1 do
@@ -29,11 +58,6 @@ defmodule CassWeb.Router do
 
     get "/health", HealthController, :show
   end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", CassWeb do
-  #   pipe_through :api
-  # end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:cass, :dev_routes) do

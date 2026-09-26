@@ -93,22 +93,31 @@ defmodule CassWeb.CoreComponents do
   @doc """
   Renders a button with navigation support.
 
+  ## Variants
+
+    * `"primary"` — the main call to action (brand background).
+    * `"secondary"` — a lower emphasis action, used for the alternative
+      choice next to a primary button and for destructive-adjacent flows.
+
+  Passing `class` adds to the variant styling, so a custom class only has to
+  describe what changes (width, margin, ...).
+
   ## Examples
 
       <.button>Send!</.button>
       <.button phx-click="go" variant="primary">Send!</.button>
+      <.button variant="secondary" type="submit">Log out</.button>
       <.button navigate={~p"/"}>Home</.button>
   """
-  attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
-  attr :class, :any
-  attr :variant, :string, values: ~w(primary)
+  attr :rest, :global,
+    include: ~w(href navigate patch method download name value disabled form type)
+
+  attr :class, :any, default: nil
+  attr :variant, :string, default: "primary", values: ~w(primary secondary)
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    assigns =
-      assign_new(assigns, :class, fn ->
-        "inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-[#0b0b14]"
-      end)
+    assigns = assign(assigns, :class, button_class(assigns.variant, assigns.class))
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
       ~H"""
@@ -124,6 +133,16 @@ defmodule CassWeb.CoreComponents do
       """
     end
   end
+
+  @primary_button_class "inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:ring-offset-[#0b0b14]"
+
+  @secondary_button_class "inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/15 dark:bg-white/5 dark:text-zinc-200 dark:hover:bg-white/10 dark:focus-visible:ring-offset-[#0b0b14]"
+
+  defp button_class(variant, nil), do: variant_class(variant)
+  defp button_class(variant, class), do: [variant_class(variant), class] |> Enum.join(" ")
+
+  defp variant_class("primary"), do: @primary_button_class
+  defp variant_class("secondary"), do: @secondary_button_class
 
   @doc """
   Renders an input with label and error messages.
@@ -334,6 +353,47 @@ defmodule CassWeb.CoreComponents do
       </div>
       <div class="flex-none">{render_slot(@actions)}</div>
     </header>
+    """
+  end
+
+  @doc """
+  Renders a centered, elevated card for the account/authentication pages.
+
+  ## Examples
+
+      <.auth_card title="Sign in">
+        <:subtitle>Welcome back.</:subtitle>
+        <.form ...>...</.form>
+      </.auth_card>
+  """
+  attr :id, :string, default: nil, doc: "the optional id of the card element"
+  attr :class, :any, default: nil, doc: "extra classes for the card element"
+
+  slot :title, required: true
+  slot :subtitle
+  slot :inner_block, required: true
+
+  def auth_card(assigns) do
+    ~H"""
+    <div class="mx-auto w-full max-w-md">
+      <div
+        id={@id}
+        class={[
+          "rounded-2xl border border-zinc-200 bg-white/80 p-6 shadow-sm backdrop-blur sm:p-8 dark:border-white/10 dark:bg-white/5",
+          @class
+        ]}
+      >
+        <div class="mb-6">
+          <h1 class="text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+            {render_slot(@title)}
+          </h1>
+          <p :if={@subtitle != []} class="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400">
+            {render_slot(@subtitle)}
+          </p>
+        </div>
+        {render_slot(@inner_block)}
+      </div>
+    </div>
     """
   end
 

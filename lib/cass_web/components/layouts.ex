@@ -52,7 +52,7 @@ defmodule CassWeb.Layouts do
 
   ## Examples
 
-      <Layouts.app flash={@flash}>
+      <Layouts.app flash={@flash} current_scope={@current_scope}>
         <h1>Content</h1>
       </Layouts.app>
 
@@ -69,7 +69,7 @@ defmodule CassWeb.Layouts do
     ~H"""
     <div class="min-h-screen bg-white text-zinc-800 dark:bg-[#0b0b14] dark:text-zinc-200">
       <header class="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur dark:border-white/10 dark:bg-[#0b0b14]/85">
-        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <a
             href={~p"/"}
             class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
@@ -77,13 +77,58 @@ defmodule CassWeb.Layouts do
           >
             <Layouts.brand_mark />
           </a>
-          <nav class="flex items-center gap-2" aria-label="Primary">
+          <nav class="flex items-center gap-1.5 sm:gap-2" aria-label="Primary">
             <a
               href="#categories"
               class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
             >
               Categories
             </a>
+
+            <%= if @current_scope && @current_scope.user do %>
+              <.link
+                navigate={~p"/users/settings"}
+                id="nav-settings"
+                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+              >
+                Settings
+              </.link>
+
+              <%!-- `method="delete"` keeps this a real browser form: Phoenix
+                    renders it as POST + a hidden `_method=delete`, which
+                    Plug.MethodOverride turns into the DELETE the router
+                    declares, and a `_csrf_token` comes along with it. --%>
+              <.form
+                for={to_form(%{}, as: "user")}
+                id="log-out-nav-form"
+                action={~p"/users/log-out"}
+                method="delete"
+              >
+                <button
+                  id="nav-log-out"
+                  type="submit"
+                  class="rounded-lg px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-200 dark:hover:bg-white/5 dark:hover:text-white"
+                >
+                  Log out
+                </button>
+              </.form>
+            <% else %>
+              <.link
+                navigate={~p"/users/log-in"}
+                id="nav-log-in"
+                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+              >
+                Log in
+              </.link>
+              <.link
+                navigate={~p"/users/register"}
+                id="nav-register"
+                class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                Create account
+              </.link>
+            <% end %>
+
             <Layouts.theme_toggle />
           </nav>
         </div>

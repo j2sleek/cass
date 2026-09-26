@@ -106,3 +106,55 @@ html[data-theme="dark"] .bg-grid {
     transition-duration: 0.01ms !important;
   }
 }
+/*
+ * Form controls for the account pages.
+ *
+ * `<.input>` replaces its classes with `class`/`error_class`, so both selectors
+ * have to carry the full base styling; the error variant only adds the red
+ * border on top of it.
+ */
+.form-input,
+.form-input-error {
+  display: block;
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid #e4e4e7;
+  background-color: #ffffff;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: #18181b;
+  box-shadow: 0 1px 2px 0 rgb(24 24 27 / 0.05);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.form-input::placeholder {
+  color: #a1a1aa;
+}
+
+.form-input:focus,
+.form-input-error:focus {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  border-color: #4643eb;
+  box-shadow: 0 0 0 3px rgb(70 67 235 / 0.25);
+}
+
+.form-input-error {
+  border-color: #f87171;
+}
+
+.form-input-error:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgb(239 68 68 / 0.25);
+}
+
+html[data-theme="dark"] .form-input,
+html[data-theme="dark"] .form-input-error {
+  border-color: rgb(255 255 255 / 0.12);
+  background-color: rgb(255 255 255 / 0.04);
+  color: #fafafa;
+  box-shadow: none;
+}

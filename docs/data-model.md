@@ -1,9 +1,9 @@
 # Data Model
 
-Current status: **Milestone 2 — catalog foundation is implemented.** Two domain
-tables exist (`cass_categories`, `cass_products`), managed by the
-`Cass.Catalog` context. Accounts, orders, and AI tool runtime data arrive in
-later milestones.
+Current status: **Milestone 3 Phase 1 — accounts and authentication are
+implemented.** Four domain tables exist: the two catalog tables below plus
+`cass_users` and `cass_users_tokens`, managed by the `Cass.Accounts` context.
+Orders, entitlements, and AI tool runtime data arrive in later milestones.
 
 ## Naming and conventions
 
@@ -69,7 +69,59 @@ code must truncate: `DateTime.utc_now() |> DateTime.truncate(:second)`
 (encapsulated as `Cass.Catalog.utc_now/0`). Test setups reuse the same
 function to stamp `published_at` for scheduling tests.
 
-## Business rules (implemented in `Cass.Catalog`)
+## Accounts schema (Milestone 3 Phase 1)
+
+### `cass_users`
+
+| Column        | Type        | Notes                                     |
+| ------------- | ----------- | ----------------------------------------- |
+| `id`          | bigint      | PK                                        |
+| `email`       | string      | Required, ≤160 chars, stored trimmed and downcased |
+| `hashed_password` | string  | PBKDF2-HMAC-SHA512, redacted in the schema |
+| `confirmed_at`| utc_datetime | Null until the emailed link is opened     |
+| `inserted_at` / `updated_at` | utc_datetime | |
+
+Index: unique `lower(email)` (`cass_users_email_index`). Uniqueness is enforced
+at the database level **and** pre-checked in the changeset for a friendly error
+message. Canonicalization happens in the changeset, so an address is stored in
+exactly one form and cannot be registered twice with different casing.
+
+There are deliberately **no** `role`, `is_vendor`, `owns_*`, or profile columns
+in this phase: authorization is not implemented yet (see
+[security.md](security.md)).
+
+### `cass_users_tokens`
+
+| Column        | Type        | Notes                                     |
+| ------------- | ----------- | ----------------------------------------- |
+| `id`          | bigint      | PK                                        |
+| `user_id`     | bigint      | FK `cass_users` (`on_delete: :delete_all`) |
+| `token`       | binary      | SHA-256 hash of the raw token (or the raw session token) |
+| `context`     | string      | `session` \| `confirm` \| `reset_password` \| `change:<current email>` |
+| `sent_to`     | string      | Address the token was mailed to           |
+| `inserted_at` | utc_datetime | Used as the issue time (expiry, reissue) |
+
+Indexes: unique `token`; `user_id_and_contexts_index`; `user_id_and_contexts_expire_index`
+for expiry sweeps.
+
+Token storage rules:
+
+* `context: "session"` stores the **raw** token. It is a credential the database
+  must be able to look up on every request, and it is protected by the signed,
+  HttpOnly cookie that carries it.
+* Every other context stores only `:crypto.hash(:sha256, raw_token)`. A dump of
+  this table therefore yields no usable confirmation, email-change, or reset
+  links.
+* `context` for an email change embeds the address the change was requested
+  **from** (`change:<old email>`), so a link stops working once the address has
+  changed. `sent_to` binds it to the new address.
+* Expiry is derived from `inserted_at` (7 days for confirm/change, 1 hour for
+  reset, 60 days for sessions) rather than stored, so there is nothing to keep
+  in sync.
+
+## Business rules (implemented in `Cass.Catalog` and `Cass.Accounts`)
+
+### Catalog
 
 * Slugs are globally unique across both tables and validated against the
   lowercase/hyphen regex (`Cass.Catalog.Validators.slug_format`).
@@ -92,14 +144,35 @@ function to stamp `published_at` for scheduling tests.
 * `published_at <= now` gates public queries (scheduled/future publishes are
   hidden until due).
 
+### Accounts
+
+* Registration is email + password; the address is required, must look like an
+  address, and must be unique. Passwords are 12–128 characters.
+* `register_user/1` always stores a `confirm` token. Confirmation consumes
+  **only** that token — it never touches existing sessions, and it never signs
+  anybody in.
+* A session token resolves to a user only while it is unexpired. Logout deletes
+  the row; a password change deletes every row for the account except the one
+  that submitted the change; a password reset deletes all of them.
+* Email changes are applied by token, not by the settings form: the form only
+  issues a `change:<old email>` token bound to the new address, and applying it
+  revokes every token issued for the previous address.
+* Password resets are verified and consumed inside the transaction that stores
+  the new hash, so a token cannot be used twice even if the request is replayed
+  concurrently.
+* Failed validation never consumes a token: a rejected reset attempt leaves the
+  link usable.
+
 ## Planned schema (roadmap)
 
-* `users`, `sessions` — accounts and password auth.
 * `orders`, `order_items` — checkout and fulfillment state machine.
 * `downloads` / `entitlements` — digital product access grants.
 * `prices` as integer minor units (`price_cents`, plain `integer`, no
   floats), currency defaulting to `USD`.
-* `seller_id` FK on products when vendor onboarding lands.
+* `seller_id` FK on products when vendor onboarding lands, plus the
+  `cass_users` role/ownership columns that phase introduces.
+* An account-deletion or credential-history table, if phase 2 hardening needs
+  one.
 
 ## Design decisions
 

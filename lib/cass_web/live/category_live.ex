@@ -42,7 +42,7 @@ defmodule CassWeb.CategoryLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current_scope={@current_scope}>
       <%= if @not_found do %>
         <NotFound.not_found resource="category" />
       <% else %>
