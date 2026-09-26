@@ -45,21 +45,22 @@
     <meta name="twitter:card" content="summary" />
 
     <%!-- Structured data (JSON-LD) --%>
+    <% base_url = CassWeb.Endpoint.url() %>
     <script type="application/ld+json" phx-no-curly-interpolation>
       {
         "@context": "https://schema.org",
         "@graph": [
           {
             "@type": "WebSite",
-            "@id": "{CassWeb.Endpoint.url()}/#website",
-            "url": "{CassWeb.Endpoint.url()}/",
+            "@id": "<%= base_url %>/#website",
+            "url": "<%= base_url %>/",
             "name": "CASS Marketplace",
             "description": "A unified marketplace for digital products, compliant social marketing services, and AI-powered tools."
           },
           {
             "@type": "Organization",
-            "@id": "{CassWeb.Endpoint.url()}/#organization",
-            "url": "{CassWeb.Endpoint.url()}/",
+            "@id": "<%= base_url %>/#organization",
+            "url": "<%= base_url %>/",
             "name": "CASS Marketplace"
           }
         ]

@@ -4,10 +4,10 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 1 (foundation).** This release ships a server-rendered
-storefront shell, a public health endpoint, documentation, and continuous
-integration. Catalog, checkout, payments, accounts, and AI features arrive in
-later milestones and are **not** available yet.
+**Status: Milestone 2 (catalog foundation).** This release ships a
+server-rendered storefront shell, a public catalog of categories and products,
+documentation, and continuous integration. Checkout, payments, accounts, and
+AI features arrive in later milestones and are **not** available yet.
 
 ## Requirements
 
@@ -32,11 +32,23 @@ mix precommit
 mix test
 ```
 
-## What's implemented (Milestone 1)
+## What's implemented (Milestone 2)
 
-* **Storefront shell** — semantic, responsive, server-rendered landing page
-  with SEO metadata (title, description, canonical, Open Graph, Twitter card)
-  and JSON-LD structured data.
+* **Catalog domain** — `categories` and `products` tables (migrations in
+  `priv/repo/migrations`), Ecto schemas, and the `Cass.Catalog` context with
+  create/update/publish/archive operations and public read queries.
+  See [docs/data-model.md](docs/data-model.md).
+* **Public catalog pages** — server-rendered LiveViews with full SEO metadata:
+  * `/catalog` — categories and latest products
+  * `/catalog/categories/:slug` — category page (breadcrumb, children)
+  * `/catalog/products/:slug` — product page (details, category link)
+  Unknown/restricted slugs render a not-found state with `noindex`.
+* **Data integrity rules** — globally unique slugs, sibling-unique category
+  names, immutable published/archived slugs, archived-entity immutability,
+  publish gating (`:draft` + active category), and visibility
+  (`public`/`unlisted`/`private`) with `published_at` scheduling.
+* **Seeds** — `mix run priv/repo/seeds.exs` loads three root categories with
+  a published product each (idempotent).
 * **Health endpoint** — `GET /api/v1/health` reports service, version,
   environment, database status, uptime, and a timestamp. See
   [API contract](docs/api-contract.md).
@@ -57,11 +69,12 @@ See [docs/architecture.md](docs/architecture.md) for details.
 
 ## Roadmap (short term)
 
-1. Catalog domains (products, categories) with Ecto schemas and migrations
-2. Storefront catalog pages
+1. ~~Catalog domains (products, categories) with Ecto schemas and migrations~~
+2. ~~Storefront catalog pages~~
 3. Accounts and authentication
 4. Checkout and order flow
 5. AI tools routed through the Nexus AI Gateway
+6. JSON catalog API under `/api/v1` (optional, additive)
 
 Payments, physical product fulfillment, and live AI integrations are scoped to
 later milestones.

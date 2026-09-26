@@ -57,6 +57,11 @@ response fields are allowed within `v1`.
 
 The following surface is planned and **explicitly not live**:
 
-* `GET /api/v1/categories` — marketplace categories
-* `GET /api/v1/products` — product listings
+* `GET /api/v1/categories` — JSON category listings
+* `GET /api/v1/products` — JSON product listings
 * Payments, orders, and AI tool proxying arrive in later milestones.
+
+> Note: as of Milestone 2, the catalog is served to the public as HTML
+> pages (`/catalog`, `/catalog/categories/:slug`, `/catalog/products/:slug`)
+> rendered by server-side LiveViews. There is no public JSON catalog API yet;
+> one may be introduced behind `/api/v1` in a later milestone.

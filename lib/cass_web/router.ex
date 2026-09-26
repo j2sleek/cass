@@ -18,6 +18,10 @@ defmodule CassWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+
+    live "/catalog", CatalogLive
+    live "/catalog/categories/:slug", CategoryLive
+    live "/catalog/products/:slug", ProductLive
   end
 
   scope "/api/v1", CassWeb.Api.V1 do
