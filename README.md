@@ -4,12 +4,14 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 3 Phase 1 (accounts and authentication).** This release
-ships the server-rendered storefront catalog *and* a complete, session-based
-account system: registration with emailed confirmation, login with an optional
-14-day remembered session, password reset, and account settings. Authorization,
-checkout, payments, and AI features arrive in later milestones and are **not**
-available yet.
+**Status: Milestone 3 Phase 2 (accounts, authentication, and the role
+foundation).** This release ships the server-rendered storefront catalog, a
+complete, session-based account system (registration with emailed confirmation,
+login with an optional 14-day remembered session, password reset, and account
+settings), and a minimal role system: every account is a customer, and
+`:admin`/`:vendor` are explicit grants read from the database on each request.
+Admin/vendor areas, ownership, checkout, payments, and AI features arrive in
+later milestones and are **not** available yet.
 
 ## Requirements
 
@@ -32,6 +34,9 @@ mix precommit
 
 # Run only tests
 mix test
+
+# Bootstrap the first admin (the only way to obtain a role)
+CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
 ```
 
 ## What's implemented
@@ -58,11 +63,40 @@ mix test
   [docs/security.md](docs/security.md).
 * **Single seam** — `CassWeb.UserAuth` provides the browser pipeline plug, the
   LiveView `on_mount` hooks, and the `current_scope` assign that every page
-  reads. `Cass.Accounts.Scope` currently carries only `user`; roles arrive in a
-  later phase.
+  reads. `Cass.Accounts.Scope` carries the user and their roles.
 * **No email provider is wired up yet** — Swoosh delivers to the local mailbox
   at `/dev/mailbox` in development, so confirmation and reset links are read
   there.
+
+### Roles and authorization (Milestone 3 Phase 2)
+
+* **Closed vocabulary** — `:admin` and `:vendor`, owned by
+  `Cass.Accounts.UserRole.roles/0` and enforced again by a database CHECK
+  constraint. There is no `:customer` role: holding no role *is* being a
+  customer, so being signed in never implies a privilege.
+* **`cass_user_roles` join table** — an account can hold several roles; a unique
+  `[user_id, role]` index makes granting idempotent, and deleting an account
+  deletes its roles. See [docs/data-model.md](docs/data-model.md).
+* **Resolved server-side on every request** — `Cass.Accounts.Scope.for_user/1`
+  reads the roles from the database each time a scope is built, so a grant
+  applies on the next request and a **revoke applies on the next one** — there
+  is no role in the session or cookie to go stale.
+* **No escalation path** — no route grants a role, no login or query parameter
+  can name one, `user_id` is never cast, untrusted role strings are matched
+  against a fixed table (no `String.to_atom/1`), and a role outside the
+  vocabulary is rejected by both the changeset and the database. See
+  [docs/security.md](docs/security.md).
+* **Guards** — `require_admin_user/2` / `on_mount(:require_admin)` and
+  `require_vendor_user/2` / `on_mount(:require_vendor)` sit next to the existing
+  `require_authenticated_user` seam, with `Scope.admin?/1` and `Scope.vendor?/1`
+  as the single source of truth. An admin is **not** implicitly a vendor.
+* **Bootstrap only** — `mix cass.accounts.create_admin` requires an explicit
+  email, takes the password from `--password`/`CASS_ADMIN_PASSWORD`, refuses to
+  run in production without `--force`, and is safe to re-run. The first account
+  to register is never auto-promoted.
+* **Not yet exposed** — no admin dashboard, vendor onboarding, product
+  ownership, or role-management UI; the guards are in place for the phases that
+  will use them, and nothing is half-protected in the meantime.
 
 ### Catalog (Milestone 2)
 
@@ -104,10 +138,12 @@ See [docs/architecture.md](docs/architecture.md) for details.
 1. ~~Catalog domains (products, categories) with Ecto schemas and migrations~~
 2. ~~Storefront catalog pages~~
 3. ~~Accounts and authentication~~
-4. Roles and authorization (vendor/admin), profile, and account deletion
-5. Checkout and order flow
-6. AI tools routed through the Nexus AI Gateway
-7. JSON catalog API under `/api/v1` (optional, additive)
+4. ~~Roles and authorization foundation (`:admin`/`:vendor`, guards)~~
+5. Vendor onboarding and product ownership, admin dashboard, profile, and
+   account deletion
+6. Checkout and order flow
+7. AI tools routed through the Nexus AI Gateway
+8. JSON catalog API under `/api/v1` (optional, additive)
 
 Payments, physical product fulfillment, and live AI integrations are scoped to
 later milestones.

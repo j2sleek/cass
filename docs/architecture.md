@@ -36,23 +36,34 @@ can later be split if needed. The active stack:
     — signed-in only (`/users/settings`)
   * `scope "/api/v1", CassWeb.Api.V1` — JSON API (currently only health)
 
+The role guards (`require_admin_user`, `require_vendor_user`) follow the same
+shape as `require_authenticated_user` and are available for a pipeline when the
+admin/vendor areas land; see
+[Accounts and current scope](#accounts-and-current-scope).
+
 ## Accounts and current scope
 
-* `Cass.Accounts` owns `cass_users`, `cass_users_tokens`, registration,
-  credential lookup, confirmation, sessions, email changes, and password
-  resets. It has no knowledge of the web layer.
+* `Cass.Accounts` owns `cass_users`, `cass_users_tokens`, `cass_user_roles`,
+  registration, credential lookup, confirmation, sessions, email changes,
+  password resets, and the role API. It has no knowledge of the web layer.
 * `CassWeb.UserAuth` is the single seam between the session and the request. It
-  provides a browser pipeline plug, a LiveView `on_mount` hook, and a
-  LiveView-safe guard:
+  provides a browser pipeline plug, LiveView `on_mount` hooks, and
+  LiveView-safe guards:
   * `fetch_current_scope_for_user/2` (plug) and `mount_current_scope/1`
     (`on_mount`) resolve the session token — from the signed session, or from
     the signed remember-me cookie — and assign
-    `current_scope: Cass.Accounts.Scope.for_user(user)`. A guest scope is
-    `nil`.
+    `current_scope: Cass.Accounts.Scope.for_user(user)`. A guest is a
+    `%Scope{user: nil, roles: %{}}`, not `nil`, so there is one shape to match
+    on everywhere.
   * `require_authenticated_user/2` (plug) and `on_mount(:require_authenticated)`
     gate signed-in-only routes. A guest GET is redirected to `/users/log-in`
     with the destination remembered in the session; non-GET requests are not
     remembered.
+  * `require_admin_user/2` / `on_mount(:require_admin)` and
+    `require_vendor_user/2` / `on_mount(:require_vendor)` gate role-scoped
+    routes. They read the same `current_scope`, so a guard never has to look
+    anything up itself. A guest is sent to log in; a signed-in account without
+    the role is sent to `/users/settings` instead of being shown a bare 403.
   * `log_in_user/3`, `log_out_user/1`, and `disconnect_sessions/1` own session
     creation, revocation, cookie handling, and the LiveView disconnect
     broadcast.
@@ -68,9 +79,31 @@ can later be split if needed. The active stack:
   `UserSessionController.delete/2`, and confirmation links are plain
   `CassWeb.UserConfirmationController` redirects so they work from an email
   client on the first request.
-* The account model is deliberately minimal in this phase (no roles, ownership,
-  or vendor flags). `Cass.Accounts.Scope` carrying only `user` is the seam
-  where a later phase widens it.
+* Roles are a separate, small subsystem:
+  * `Cass.Accounts.UserRole` owns the closed vocabulary (`roles/0` →
+    `[:admin, :vendor]`), input parsing (`parse/1`, no atom interning), the
+    grant changeset, and the per-user query. The database check constraint
+    mirrors the vocabulary, so the two are never allowed to drift.
+  * `Cass.Accounts` exposes the whole role surface — `roles/0`,
+    `list_user_roles/1`, `user_has_role?/2`, `grant_user_role/2`,
+    `revoke_user_role/2` — and nothing else touches `cass_user_roles` directly.
+  * `Cass.Accounts.Scope` resolves roles **server-side, on every scope build**,
+    and exposes the nil-safe predicates (`authenticated?/1`, `admin?/1`,
+    `vendor?/1`, `role?/2`) that both the plug guards and the LiveView hooks
+    ask. One predicate set means "is this allowed" has a single answer in the
+    codebase.
+  * The account a role is written against is always the `%User{}` handed to the
+    context function; `user_id` is set programmatically and never cast, so
+    there is no request path that can name the account it wants to promote.
+* **No route is role-guarded yet**, and that is intentional: the phase delivers
+  the vocabulary, storage, scope, and guards, and the admin/vendor areas that
+  will consume them arrive later. Nothing is half-protected in the meantime.
+* Roles are bootstrapped by an operator task,
+  `mix cass.accounts.create_admin` (`lib/mix/tasks/`), which requires an
+  explicit email, takes the password from `--password` or
+  `CASS_ADMIN_PASSWORD`, refuses to run in production without `--force`, and is
+  safe to re-run. There is no first-user auto-promotion and no HTTP route that
+  grants a role.
 
 See [docs/security.md](security.md) for the token, password, and enumeration
 controls, and [docs/data-model.md](data-model.md) for the tables.
@@ -109,9 +142,19 @@ controls, and [docs/data-model.md](data-model.md) for the tables.
   in Milestone 3 Phase 1: `user_auth_test.exs` (plug/LiveView hooks),
   `controllers/user_session_controller_test.exs`,
   `controllers/user_confirmation_controller_test.exs`, and one
-  `live/user_*_live_test.exs` per auth page.
+  `live/user_*_live_test.exs` per auth page. Phase 2 adds
+  `user_authorization_test.exs` (role plug guards and `on_mount` hooks, driven
+  through direct `UserAuth` calls with a bare socket so no route is needed).
 * `test/cass` — context tests backed by a real PostgreSQL database (DataCase).
+  Phase 2 adds `accounts/roles_test.exs` (vocabulary, grant/revoke, database
+  constraints, scope resolution).
+* `test/mix/tasks` — operator task tests, added in Phase 2 for
+  `cass.accounts.create_admin` (env-var handling, production refusal,
+  idempotency, promotion of an existing account).
 * The `precommit` alias runs formatter, compile with warnings as errors,
   `deps.unlock --unused`, and the full test suite.
 * CI (`/.github/workflows/ci.yml`) replays the same checks against a fresh
   PostgreSQL service on every push.
+* Role-specific HTTP behaviour is additionally checked against a running server
+  (login with `role` params grants nothing, the session cookie carries no role,
+  a grant shows up on the next request and a revoke on the one after).

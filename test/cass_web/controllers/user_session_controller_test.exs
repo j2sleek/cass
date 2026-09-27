@@ -31,6 +31,41 @@ defmodule CassWeb.UserSessionControllerTest do
       refute session_cookie.secure
     end
 
+    test "puts no role data in the session cookie", %{conn: conn, user: user} do
+      :ok = Accounts.grant_user_role(user, :admin)
+
+      conn =
+        post(conn, ~p"/users/log-in", %{
+          "user" => %{"email" => user.email, "password" => valid_user_password()}
+        })
+
+      # The admin role is resolved from `cass_user_roles` on every request; the
+      # session carries the opaque token, the socket topic derived from it, and
+      # the flash, and nothing else — so there is nothing in the cookie to
+      # tamper with or replay.
+      session = conn.private[:plug_session]
+
+      assert Enum.sort(Map.keys(session)) == ["live_socket_id", "phoenix_flash", "user_token"]
+      refute inspect(session) =~ "admin"
+      refute inspect(session) =~ to_string(user.id)
+    end
+
+    test "ignores role parameters in the log in form", %{conn: conn, user: user} do
+      conn =
+        post(conn, ~p"/users/log-in", %{
+          "user" => %{
+            "email" => user.email,
+            "password" => valid_user_password(),
+            "role" => "admin",
+            "roles" => %{"0" => "admin"},
+            "admin" => "true"
+          }
+        })
+
+      assert redirected_to(conn) == ~p"/"
+      assert Accounts.list_user_roles(user) == []
+    end
+
     test "logs the user in with remember me", %{conn: conn, user: user} do
       conn =
         post(conn, ~p"/users/log-in", %{

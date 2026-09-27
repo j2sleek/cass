@@ -8,6 +8,7 @@ defmodule CassWeb.UserAuthTest do
   import Ecto.Query
 
   alias Cass.Accounts
+  alias Cass.Accounts.Scope
   alias Cass.Accounts.UserToken
   alias Cass.Repo
   alias CassWeb.UserAuth
@@ -27,7 +28,7 @@ defmodule CassWeb.UserAuthTest do
     test "assigns a guest scope when there is no session", %{conn: conn} do
       conn = UserAuth.fetch_current_scope_for_user(conn, [])
 
-      assert conn.assigns.current_scope == nil
+      assert conn.assigns.current_scope == %Scope{}
     end
 
     test "assigns the user of a valid session token", %{conn: conn, user: user} do
@@ -44,7 +45,7 @@ defmodule CassWeb.UserAuthTest do
 
       conn = conn |> put_session(:user_token, token) |> UserAuth.fetch_current_scope_for_user([])
 
-      assert conn.assigns.current_scope == nil
+      assert conn.assigns.current_scope == %Scope{}
     end
 
     test "an unknown session token resolves to a guest scope", %{conn: conn} do
@@ -53,13 +54,90 @@ defmodule CassWeb.UserAuthTest do
         |> put_session(:user_token, "not-a-token")
         |> UserAuth.fetch_current_scope_for_user([])
 
-      assert conn.assigns.current_scope == nil
+      assert conn.assigns.current_scope == %Scope{}
+    end
+
+    test "assigns the roles the user holds", %{conn: conn} do
+      user = user_fixture() |> role_fixture(:vendor) |> role_fixture(:admin)
+      token = Accounts.generate_user_session_token(user)
+
+      conn = conn |> put_session(:user_token, token) |> UserAuth.fetch_current_scope_for_user([])
+
+      assert conn.assigns.current_scope.roles == MapSet.new([:admin, :vendor])
+      assert Scope.admin?(conn.assigns.current_scope)
+      assert Scope.vendor?(conn.assigns.current_scope)
+    end
+
+    test "assigns no roles to a customer", %{conn: conn} do
+      token = Accounts.generate_user_session_token(user_fixture())
+      conn = conn |> put_session(:user_token, token) |> UserAuth.fetch_current_scope_for_user([])
+
+      assert conn.assigns.current_scope.roles == MapSet.new()
+      refute Scope.admin?(conn.assigns.current_scope)
+      refute Scope.vendor?(conn.assigns.current_scope)
+    end
+
+    test "picks up a role granted after the session was created", %{conn: conn} do
+      user = user_fixture()
+      token = Accounts.generate_user_session_token(user)
+
+      before =
+        conn |> put_session(:user_token, token) |> UserAuth.fetch_current_scope_for_user([])
+
+      assert Scope.admin?(before.assigns.current_scope) == false
+
+      :ok = Accounts.grant_user_role(user, :admin)
+
+      after_grant =
+        conn |> put_session(:user_token, token) |> UserAuth.fetch_current_scope_for_user([])
+
+      # The same session cookie, resolved again: the grant applies to the next
+      # request, with no new login and no session change.
+      assert Scope.admin?(after_grant.assigns.current_scope)
+    end
+
+    test "picks up a revoked role on the next request", %{conn: conn} do
+      user = admin_fixture()
+      token = Accounts.generate_user_session_token(user)
+
+      assert conn
+             |> put_session(:user_token, token)
+             |> UserAuth.fetch_current_scope_for_user([])
+             |> Map.fetch!(:assigns)
+             |> Map.fetch!(:current_scope)
+             |> Scope.admin?()
+
+      :ok = Accounts.revoke_user_role(user, :admin)
+
+      assert conn
+             |> put_session(:user_token, token)
+             |> UserAuth.fetch_current_scope_for_user([])
+             |> Map.fetch!(:assigns)
+             |> Map.fetch!(:current_scope)
+             |> Scope.admin?() == false
+    end
+
+    test "keeps authorization data out of the session", %{conn: conn} do
+      user = user_fixture() |> role_fixture(:admin)
+
+      conn = conn |> log_in_user(user) |> UserAuth.fetch_current_scope_for_user([])
+
+      # The session is the only client-held state, and what it holds is the
+      # opaque token that was written into it: no role, no user id, nothing an
+      # attacker could add to a cookie to become an admin. (The end-to-end
+      # version, asserting the contents of the real login session cookie, is in
+      # `CassWeb.UserSessionControllerTest`.)
+      session = conn.private[:plug_session]
+
+      assert session["user_token"] == get_session(conn, :user_token)
+      refute inspect(session) =~ "admin"
+      refute inspect(session) =~ to_string(user.id)
     end
 
     test "resumes a session from the signed remember me cookie", %{conn: conn, user: user} do
       logged_in =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> UserAuth.log_in_user(user, %{"remember_me" => "true"})
 
       cookie = logged_in.resp_cookies[@remember_me_cookie]
@@ -106,7 +184,7 @@ defmodule CassWeb.UserAuthTest do
 
   describe "log_in_user/3" do
     test "stores a session token and redirects", %{conn: conn, user: user} do
-      conn = conn |> assign(:current_scope, nil) |> UserAuth.log_in_user(user)
+      conn = conn |> assign(:current_scope, Scope.for_user(nil)) |> UserAuth.log_in_user(user)
 
       # A guest has no scope yet, so the fallback landing page is the catalog.
       assert redirected_to(conn) == ~p"/"
@@ -119,7 +197,7 @@ defmodule CassWeb.UserAuthTest do
     test "renews the session, dropping anything that was in it", %{conn: conn, user: user} do
       conn =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> put_session(:to_be_removed, "value")
         |> UserAuth.log_in_user(user)
 
@@ -130,7 +208,7 @@ defmodule CassWeb.UserAuthTest do
     test "redirects to the stored return path and clears it", %{conn: conn, user: user} do
       conn =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> put_session(:user_return_to, "/catalog")
         |> UserAuth.log_in_user(user)
 
@@ -141,7 +219,7 @@ defmodule CassWeb.UserAuthTest do
     test "writes a signed, HttpOnly, SameSite=Lax remember me cookie", %{conn: conn, user: user} do
       conn =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> UserAuth.log_in_user(user, %{"remember_me" => "true"})
 
       cookie = conn.resp_cookies[@remember_me_cookie]
@@ -153,7 +231,7 @@ defmodule CassWeb.UserAuthTest do
     end
 
     test "does not write a remember me cookie by default", %{conn: conn, user: user} do
-      conn = conn |> assign(:current_scope, nil) |> UserAuth.log_in_user(user)
+      conn = conn |> assign(:current_scope, Scope.for_user(nil)) |> UserAuth.log_in_user(user)
       refute conn.resp_cookies[@remember_me_cookie]
     end
 
@@ -179,7 +257,7 @@ defmodule CassWeb.UserAuthTest do
 
       conn =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> put_session(:user_token, token)
         |> put_session(:to_be_removed, "value")
         |> put_resp_cookie(@remember_me_cookie, "signed-value", max_age: 60)
@@ -197,7 +275,7 @@ defmodule CassWeb.UserAuthTest do
     test "redirects a guest to the login page", %{conn: conn} do
       conn =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> fetch_flash()
         |> UserAuth.require_authenticated_user([])
 
@@ -209,7 +287,7 @@ defmodule CassWeb.UserAuthTest do
     test "stores the current path for a guest", %{conn: conn} do
       conn =
         %{conn | path_info: ["catalog", "products", "some-product"]}
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> fetch_flash()
         |> UserAuth.require_authenticated_user([])
 
@@ -219,7 +297,7 @@ defmodule CassWeb.UserAuthTest do
     test "does not store a return path for a non-GET request", %{conn: conn} do
       conn =
         conn
-        |> assign(:current_scope, nil)
+        |> assign(:current_scope, Scope.for_user(nil))
         |> fetch_flash()
         |> Map.put(:method, "POST")
         |> UserAuth.require_authenticated_user([])

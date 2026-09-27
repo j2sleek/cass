@@ -5,6 +5,8 @@ defmodule CassWeb.Layouts do
   """
   use CassWeb, :html
 
+  alias Cass.Accounts.Scope
+
   # Embed all files in layouts/* within this module.
   # The default root.html.heex file contains the HTML
   # skeleton of your application, namely HTML headers
@@ -85,7 +87,7 @@ defmodule CassWeb.Layouts do
               Categories
             </a>
 
-            <%= if @current_scope && @current_scope.user do %>
+            <%= if Scope.authenticated?(@current_scope) do %>
               <.link
                 navigate={~p"/users/settings"}
                 id="nav-settings"

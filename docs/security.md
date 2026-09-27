@@ -1,7 +1,9 @@
 # Security
 
-Current status: **Milestone 3 Phase 1 — accounts and authentication are
-implemented** (see [Accounts security](#accounts-and-authentication-milestone-3-phase-1)).
+Current status: **Milestone 3 Phase 2 — accounts, authentication, and the
+`:admin`/`:vendor` role foundation are implemented** (see
+[Accounts security](#accounts-and-authentication-milestone-3-phase-1) and
+[Roles and authorization](#roles-and-authorization-milestone-3-phase-2)).
 Catalog controls (below) still apply unchanged.
 
 ## Threat model and boundaries
@@ -140,16 +142,21 @@ database leak does not yield usable links. Every one of them is additionally:
 
 ### Scope and authorization
 
-* `Cass.Accounts.Scope` carries only the `user`. Authorization is **not**
-  implemented in this phase — there are no roles, ownership, or vendor flags
-  yet, so there is nothing to authorize against. `require_authenticated_user/2`
-  and `on_mount(:require_authenticated)` answer exactly one question: is there
-  a signed-in user? Adding roles in a later phase means widening the scope
-  struct, not rewriting the guards.
+* `Cass.Accounts.Scope` carries the resolved `user` **and** the account's
+  `roles` (`MapSet` of `:admin`/`:vendor` atoms), loaded from
+  `cass_user_roles` server-side. A guest is `%Scope{user: nil, roles: %{}}`
+  rather than `nil`, so there is a single struct to pattern match on.
+* `require_authenticated_user/2` and `on_mount(:require_authenticated)` answer
+  exactly one question: is there a signed-in user? Role guards are separate
+  (`require_admin_user/2`, `require_vendor_user/2`,
+  `on_mount(:require_admin)`, `on_mount(:require_vendor)`), so a guest is never
+  silently treated as a customer-with-permissions.
 * The web layer never trusts an id from the request to identify the acting
-  user; it always reads `conn.assigns.current_scope.user`.
+  user; it always reads `conn.assigns.current_scope.user`. See
+  [Roles and authorization](#roles-and-authorization-milestone-3-phase-2) for
+  how roles are resolved.
 
-### Deliberate limitations
+### Deliberate limitations (Milestone 3 Phase 1)
 
 * **No email provider is wired up.** `Cass.Mailer` uses Swoosh: the local
   adapter in development (`/dev/mailbox`) and the test adapter in tests.
@@ -164,6 +171,106 @@ database leak does not yield usable links. Every one of them is additionally:
 * **No account deletion, session listing, or "sign out everywhere" page** yet;
   password change and logout are the only session controls.
 * **No two-factor authentication.**
+
+## Roles and authorization (Milestone 3 Phase 2)
+
+### The threat
+
+The one thing this phase must make impossible is a client that talks itself into
+a privilege it was not granted. Every role-bearing input is untrusted: query
+strings, form bodies, JSON, cookies, headers. The rule is that **nothing in the
+request may name a role or an account.**
+
+### How roles are resolved
+
+* `CassWeb.UserAuth` builds the scope on every request/LiveView mount from the
+  session token, and `Cass.Accounts.Scope.for_user/1` reads the roles from
+  `cass_user_roles` in that same call. The session cookie keeps holding only
+  opaque tokens — a decoded real session carries `user_token` (and LiveView's
+  `live_socket_id` / CSRF token), never a role, a user id, or an email
+  (`test/cass_web/controllers/user_session_controller_test.exs`).
+* Because the read is per-request, a revoke takes effect on the **next**
+  request or mount. There is no cached copy in a cookie or session to
+  contradict the database, and an open LiveView does not keep a revoked admin
+  signed in as an admin.
+
+### No escalation path exists
+
+* **No route grants or revokes a role.** There is no `PATCH /users/roles`, no
+  admin user list, and no self-service promotion. Role changes happen only
+  through application code (`Cass.Accounts.grant_user_role/2`,
+  `revoke_user_role/2`) or the `mix cass.accounts.create_admin` task, which is
+  an operator action on a machine with database access.
+* **Login params are not roles.** Posting `user[role]=admin` or
+  `user[roles][]=admin` to `/users/log-in`, or `?role=admin` on any page, grants
+  nothing — the login controller reads only `email` and `password`
+  (`test/cass_web/controllers/user_session_controller_test.exs`), and the
+  registered user ends up with no role. Verified against a running server as
+  well as in tests.
+* **The account a role applies to is never a parameter.**
+  `Cass.Accounts.grant_user_role/2` takes a `%User{}` struct and sets
+  `user_id` on the row it builds; `UserRole.changeset/2` casts `:role` only, so
+  a `user_id` in the same attribute map is ignored.
+* **Only known roles exist.** `UserRole.parse/1` maps input through a fixed
+  table (trimmed, case-insensitive) and returns `:error` for anything else.
+  No `String.to_atom/1` / `String.to_existing_atom/1` is applied to input, so a
+  hostile string cannot intern an atom or reach a comparison.
+* **The database is the second line of defence.** `cass_user_roles_role_check`
+  rejects a role outside the vocabulary, and the unique `[user_id, role]` index
+  makes a duplicate grant a no-op instead of a second authority.
+* **Guards answer from the database-derived scope only.** The plug guards
+  (`require_admin_user/2`, `require_vendor_user/2`) and the LiveView hooks
+  (`on_mount(:require_admin)`, `:require_vendor`) read
+  `current_scope`, which the request never writes. An admin is **not** implicitly
+  a vendor: each is its own grant, checked with its own predicate.
+* **No `:customer` role.** "No rows" is the customer state, so being signed in
+  never implies a privilege that a later guard would grant.
+
+### Failing closed
+
+* A guest hitting a role-guarded route is sent to `/users/log-in` with the
+  destination remembered (GET only).
+* A signed-in user *without* the role is sent to `/users/settings` rather than
+  shown a bare 403, which avoids advertising the existence of an admin area. The
+  flash explains that the account lacks the role.
+* An unknown role in the database (only reachable by disabling the constraint)
+  is skipped when a scope is built, so it can never be treated as a role and
+  cannot take a request down.
+
+### Bootstrap
+
+`mix cass.accounts.create_admin` is the only supported way to get the first
+admin, and it is deliberately awkward:
+
+* The email is required on the command line; nothing is inferred from who runs
+  it, and **the first account to register is never auto-promoted**.
+* The password comes from `--password` or `CASS_ADMIN_PASSWORD`, never from a
+  prompt, so it cannot end up in shell history or a transcript by accident.
+* In production the task refuses to run without `--force`, so a stray deploy
+  hook cannot silently create an admin.
+* It touches nothing else: an existing account is promoted in place (its
+  password is not changed), and re-running is a no-op.
+
+### Deliberate limitations (Milestone 3 Phase 2)
+
+* **The role guards are not wired to any route yet.** This phase delivers the
+  vocabulary, the storage, the scope, and the guards; the admin and vendor areas
+  that will use them arrive in later phases. Nothing is exposed in the meantime,
+  so there is no half-protected area to get wrong.
+* **No role management UI or API.** Granting a role is a console/CLI action on
+  purpose. An operator UI is a later decision, and it will need its own
+  authorization design (who may promote whom).
+* **No audit trail for role changes.** Grants and revocations are not recorded
+  in a separate table; `cass_user_roles.inserted_at` shows when a currently held
+  role was granted, but a revoke leaves no row behind. An audit log belongs with
+  the admin area, not ahead of it.
+* **A per-request role query is a deliberate cost.** Every request that builds a
+  scope issues one small indexed query. That is the price of not caching
+  authorization in the client; if it ever needs optimizing, the fix is a
+  short-lived server-side cache, not a cookie.
+* **Ownership is still not modeled.** `:vendor` marks an account as a seller but
+  grants no rights over any product; there is no `seller_id` yet, so no
+  vendor-scoped authorization can be (mis)written against this phase.
 
 ## Input handling conventions (for future features)
 
@@ -210,3 +317,14 @@ For authentication specifically:
   hashes are useless without the raw token.
 * A suspected password leak means forcing a reset for the affected account, not
   waiting for expiry.
+
+For roles:
+
+* A wrongly granted role is removed by revoking it
+  (`Cass.Accounts.revoke_user_role/2`, or
+  `DELETE FROM cass_user_roles WHERE user_id = $1 AND role = $2`). The next
+  request or LiveView mount already sees the revocation — there is no session
+  to invalidate.
+* A compromised **admin account** still warrants a password change: that revokes
+  every session for the account, which is the only way to cut off an open tab
+  immediately.

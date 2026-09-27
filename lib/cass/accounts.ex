@@ -36,12 +36,21 @@ defmodule Cass.Accounts do
     Authentication always resolves a `%User{}` from a server-held session
     token; `Cass.Accounts.Scope` is the only carrier of caller identity, and
     it is built by `CassWeb.UserAuth`.
+  * **Roles are granted, never self-assigned** — roles live in
+    `cass_user_roles` (`Cass.Accounts.UserRole`) and are only ever changed by the
+    `grant_user_role/2` and `revoke_user_role/2` functions below. There is no
+    `update_user/2`, nothing casts a role on a user changeset, and no
+    self-service path of any kind. A caller can only reach these functions from
+    trusted server code (the `mix cass.accounts.create_admin` bootstrap task and,
+    later, an admin area), never from a request payload. `Cass.Accounts.Scope`
+    reads the roles back on every scope construction, so a revoke applies on the
+    next request.
 
   Return conventions: `{:ok, record}` / `{:error, changeset}` / `nil`.
   """
   import Ecto.Query, warn: false
 
-  alias Cass.Accounts.{User, UserNotifier, UserToken}
+  alias Cass.Accounts.{User, UserNotifier, UserRole, UserToken}
   alias Cass.Repo
 
   ## Database getters
@@ -94,6 +103,140 @@ defmodule Cass.Accounts do
 
   """
   def get_user!(id), do: Repo.get!(User, id)
+
+  ## Roles
+
+  @doc """
+  The complete set of roles an account can hold.
+
+  ## Examples
+
+      iex> roles()
+      [:admin, :vendor]
+
+  """
+  @spec roles() :: [UserRole.role()]
+  def roles, do: UserRole.roles()
+
+  @doc """
+  Lists the roles of a user as atoms, in `roles/0` order.
+
+  A user with no rows has no roles; there is no implicit `:customer` role, so
+  the result of `[]` means "ordinary customer".
+
+  ## Examples
+
+      iex> user = %User{id: 123}
+      iex> list_user_roles(user)
+      []
+
+  """
+  @spec list_user_roles(User.t()) :: [UserRole.role()]
+  def list_user_roles(%User{} = user) do
+    user
+    |> UserRole.query_for_user()
+    |> Repo.all()
+    |> Enum.map(&UserRole.parse(&1.role))
+    |> Enum.flat_map(fn
+      {:ok, role} -> [role]
+      # Unreachable thanks to `cass_user_roles_role_check`; skipped rather than
+      # crashing so a hand-edited row can never take a request down with it.
+      :error -> []
+    end)
+  end
+
+  @doc """
+  Returns true when the user holds the given role.
+
+  Accepts either form a role is written in, as `grant_user_role/2` and
+  `revoke_user_role/2` do. A value outside `roles/0` is simply not held, so a
+  hostile string cannot reach the comparison as an atom.
+
+  ## Examples
+
+      iex> user_has_role?(%User{id: 123}, :admin)
+      false
+
+      iex> user_has_role?(%User{id: 123}, "admin")
+      false
+
+      iex> user_has_role?(%User{id: 123}, "superuser")
+      false
+
+  """
+  @spec user_has_role?(User.t(), UserRole.role_input()) :: boolean()
+  def user_has_role?(%User{} = user, role) do
+    case UserRole.parse(role) do
+      {:ok, role} -> role in list_user_roles(user)
+      :error -> false
+    end
+  end
+
+  @doc """
+  Grants a role to a user.
+
+  Idempotent: granting a role the user already holds is a no-op that still
+  returns `:ok`, so a bootstrap or a migration script can be re-run safely. The
+  role must be one of `roles/0`; anything else is rejected by the changeset
+  (and, independently, by the `cass_user_roles_role_check` constraint).
+
+  The role is only ever applied to the `%User{}` handed to this function, so
+  there is no way for a request parameter to name the account that gets it.
+
+  ## Examples
+
+      iex> user = %User{id: 123}
+      iex> grant_user_role(user, :admin)
+      :ok
+
+      iex> grant_user_role(user, :superuser)
+      {:error, %Ecto.Changeset{}}
+
+  """
+  @spec grant_user_role(User.t(), UserRole.role_input()) :: :ok | {:error, Ecto.Changeset.t()}
+  def grant_user_role(%User{} = user, role) do
+    case UserRole.changeset(%UserRole{user_id: user.id}, %{role: role}) do
+      # An already-held role hits the unique index; treat it as success.
+      %Ecto.Changeset{valid?: true} = changeset ->
+        _ = Repo.insert(changeset, on_conflict: :nothing, conflict_target: [:user_id, :role])
+        :ok
+
+      changeset ->
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Revokes a role from a user.
+
+  Idempotent: revoking a role the user does not hold is a no-op that returns
+  `:ok`. An unknown role is an error rather than a silent no-op, so a typo in
+  trusted server code is not mistaken for a successful revocation.
+
+  ## Examples
+
+      iex> user = %User{id: 123}
+      iex> revoke_user_role(user, :vendor)
+      :ok
+
+      iex> revoke_user_role(user, :superuser)
+      {:error, :invalid_role}
+
+  """
+  @spec revoke_user_role(User.t(), UserRole.role_input()) :: :ok | {:error, :invalid_role}
+  def revoke_user_role(%User{} = user, role) do
+    case UserRole.parse(role) do
+      {:ok, role} ->
+        Repo.delete_all(
+          from r in UserRole, where: r.user_id == ^user.id and r.role == ^to_string(role)
+        )
+
+        :ok
+
+      :error ->
+        {:error, :invalid_role}
+    end
+  end
 
   ## User registration
 

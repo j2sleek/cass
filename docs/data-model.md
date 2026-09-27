@@ -1,9 +1,10 @@
 # Data Model
 
-Current status: **Milestone 3 Phase 1 — accounts and authentication are
-implemented.** Four domain tables exist: the two catalog tables below plus
-`cass_users` and `cass_users_tokens`, managed by the `Cass.Accounts` context.
-Orders, entitlements, and AI tool runtime data arrive in later milestones.
+Current status: **Milestone 3 Phase 2 — the role foundation is implemented.**
+Five domain tables exist: the two catalog tables below plus `cass_users`,
+`cass_users_tokens`, and `cass_user_roles`, all owned by the `Cass.Accounts`
+context. Orders, entitlements, and AI tool runtime data arrive in later
+milestones.
 
 ## Naming and conventions
 
@@ -87,8 +88,8 @@ message. Canonicalization happens in the changeset, so an address is stored in
 exactly one form and cannot be registered twice with different casing.
 
 There are deliberately **no** `role`, `is_vendor`, `owns_*`, or profile columns
-in this phase: authorization is not implemented yet (see
-[security.md](security.md)).
+on `cass_users`: roles live in a join table (below) so an account can hold more
+than one, and ownership does not exist yet (see [security.md](security.md)).
 
 ### `cass_users_tokens`
 
@@ -118,6 +119,40 @@ Token storage rules:
 * Expiry is derived from `inserted_at` (7 days for confirm/change, 1 hour for
   reset, 60 days for sessions) rather than stored, so there is nothing to keep
   in sync.
+
+## Authorization schema (Milestone 3 Phase 2)
+
+### `cass_user_roles`
+
+| Column        | Type        | Notes                                     |
+| ------------- | ----------- | ----------------------------------------- |
+| `id`          | bigint      | PK                                        |
+| `user_id`     | bigint      | FK `cass_users` (`on_delete: :delete_all`) |
+| `role`        | string      | `admin` \| `vendor`                       |
+| `inserted_at` | utc_datetime | |
+
+Indexes: unique `[user_id, role]` (`cass_user_roles_user_id_role_index`) and a
+plain index on `[role]` for "who are the vendors/admins" lookups. A CHECK
+constraint (`cass_user_roles_role_check`) restricts `role` to the two known
+values, so the vocabulary is enforced independently of the application.
+
+Design notes:
+
+* Roles are a **join table, not a column**, so an account can hold several at
+  once and granting one is a row insert rather than a `users` update. There is
+  no `updated_at`: a role row is either present or not, and a re-grant after a
+  revoke gets a fresh row.
+* The unique index makes granting idempotent (`ON CONFLICT DO NOTHING`), and
+  the same pair cannot be stored twice even by a direct database write.
+* Deleting an account deletes its roles, so a revoked role cannot outlive the
+  user it belonged to.
+* There is deliberately **no `:customer` role**: holding no rows *is* being a
+  customer, which keeps "signed in" and "is a seller" independent.
+
+The vocabulary is owned by `Cass.Accounts.UserRole.roles/0` (`[:admin,
+:vendor]`) and mirrored by the check constraint. Adding a role therefore needs
+a migration, not just a code change — the same discipline the Phase 1 token
+contexts use.
 
 ## Business rules (implemented in `Cass.Catalog` and `Cass.Accounts`)
 
@@ -163,16 +198,39 @@ Token storage rules:
 * Failed validation never consumes a token: a rejected reset attempt leaves the
   link usable.
 
+### Roles and authorization
+
+* `roles/0` is the closed vocabulary (`[:admin, :vendor]`);
+  `UserRole.parse/1` accepts the atom or the string form (trimmed,
+  case-insensitive) and rejects everything else, without interning atoms from
+  input.
+* `list_user_roles/1` returns role atoms ordered by the stored string. An empty
+  list means an ordinary customer — there is no implicit `:customer`.
+* `grant_user_role/2` and `revoke_user_role/2` are both idempotent and both
+  reject a role outside the vocabulary (the changeset rejects it; the check
+  constraint rejects it independently). The account a role is written against is
+  the `%User{}` passed to the function — never a parameter.
+* `user_has_role?/2` accepts either role form and is `false` for anything
+  outside the vocabulary.
+* Roles are read from this table whenever a `Cass.Accounts.Scope` is built, so a
+  revoke takes effect on the next request or LiveView mount rather than when a
+  session expires.
+* There is no self-service grant path in this phase: the only way to obtain a
+  role is `mix cass.accounts.create_admin` or application code calling the
+  context. No HTTP route grants roles.
+
 ## Planned schema (roadmap)
 
 * `orders`, `order_items` — checkout and fulfillment state machine.
 * `downloads` / `entitlements` — digital product access grants.
 * `prices` as integer minor units (`price_cents`, plain `integer`, no
   floats), currency defaulting to `USD`.
-* `seller_id` FK on products when vendor onboarding lands, plus the
-  `cass_users` role/ownership columns that phase introduces.
-* An account-deletion or credential-history table, if phase 2 hardening needs
-  one.
+* `seller_id` FK on products when vendor onboarding lands, plus the ownership
+  columns that phase introduces. Roles already exist
+  (`cass_user_roles`), so vendor onboarding only has to add the ownership
+  relationship — not a role system.
+* An account-deletion or credential-history table, if a later hardening phase
+  needs one.
 
 ## Design decisions
 

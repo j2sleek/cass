@@ -2,10 +2,11 @@ defmodule Cass.Accounts.User do
   @moduledoc """
   A CASS account.
 
-  Milestone 3 Phase 1 keeps the account model deliberately minimal: an email
-  address, the hashed password, and the confirmation timestamp. Roles,
-  ownership, vendor flags, and profile fields are **not** part of this phase —
-  they belong to later Milestone 3 phases (see `docs/data-model.md`).
+  Milestone 3 Phase 2 added roles, and nothing else: an account is an email
+  address, the hashed password, and the confirmation timestamp, plus the roles
+  in `cass_user_roles` (see `Cass.Accounts.UserRole`). Ownership, vendor
+  profile fields, and every other later-phase column are still **not** part of
+  this model (see `docs/data-model.md`).
 
   ## Password hashing
 
@@ -13,6 +14,12 @@ defmodule Cass.Accounts.User do
   `docs/security.md`). `hashed_password` is `:redact`ed so it can never leak
   through `inspect/1`, crash reports, or log output, and `:password` /
   `:current_password` are virtual and `:redact`ed as well.
+
+  ## Roles
+
+  Roles are not a field on this schema. They live in `cass_user_roles` and are
+  read through `Cass.Accounts.list_user_roles/1` or the `user_roles`
+  association, so granting a role never rewrites the user row.
 
   ## Email case handling
 
@@ -47,6 +54,8 @@ defmodule Cass.Accounts.User do
     field :current_password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
+
+    has_many :user_roles, Cass.Accounts.UserRole, foreign_key: :user_id
 
     timestamps(type: :utc_datetime)
   end
