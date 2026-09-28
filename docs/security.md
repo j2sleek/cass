@@ -268,9 +268,127 @@ admin, and it is deliberately awkward:
   scope issues one small indexed query. That is the price of not caching
   authorization in the client; if it ever needs optimizing, the fix is a
   short-lived server-side cache, not a cookie.
-* **Ownership is still not modeled.** `:vendor` marks an account as a seller but
-  grants no rights over any product; there is no `seller_id` yet, so no
-  vendor-scoped authorization can be (mis)written against this phase.
+* **Ownership was not modeled in this phase.** `:vendor` marked an account as a
+  seller but granted no rights over any product. Ownership arrives in Phase 3,
+  below.
+
+## Product ownership (Milestone 3 Phase 3)
+
+### The threat
+
+A product becomes sellable content. Two failures matter and both are IDORs:
+a seller editing or publishing **another seller's** product, and a seller
+**claiming** a product that belongs to somebody else (or to the platform) by
+naming an owner in a form. Both are prevented by the same rule — ownership is
+server-derived data, never client input — plus a check that does not depend on
+the web layer.
+
+### Ownership is a fact, not a capability
+
+`cass_products.owner_id` is a nullable FK to `cass_users.id`; `NULL` is the
+platform. It is deliberately **independent** of the `cass_user_roles` rows: a
+role says what an account may do, the owner id says whose product it is, and
+neither implies the other.
+
+| caller   | create owned | manage own | manage others | manage platform |
+| -------- | ------------ | ---------- | ------------- | --------------- |
+| guest    | no           | no         | no            | no              |
+| customer | no           | no         | no            | no              |
+| vendor   | yes          | yes        | no            | no              |
+| admin    | yes          | yes        | yes           | yes             |
+
+A platform product is admin-only by construction: `can_manage_product?/2`
+matches on `product.owner_id == scope.user.id`, and `nil` can never equal a user
+id (nor does a guest have one).
+
+### The check is in the context, not only in the route
+
+Every product mutation takes the caller's `Cass.Accounts.Scope` as its first
+argument and checks `can_create_owned_product?/1` or `can_manage_product?/2`
+**before** the row is read for writing:
+
+```elixir
+def update_product(%Scope{} = scope, %Product{} = product, attrs) do
+  if can_manage_product?(scope, product) do
+    product |> Product.update_changeset(attrs) |> Repo.update()
+  else
+    not_authorized(product, @not_authorized_to_manage)
+  end
+end
+```
+
+This is stricter than guarding the route. A missing `on_mount` hook, a new
+caller, or a console task all hit the same check, so authorization cannot be
+skipped by reaching the context directly.
+
+### Refusals are not enumerable
+
+* A refusal is `{:error, changeset}` with a single `:base` message that never
+  distinguishes "not yours" from "does not exist", so a probe cannot learn
+  whether a product id exists.
+* `get_managed_product/2` filters by the caller's rights **in SQL** and returns
+  `nil` for anything else. The management UI renders the same not-found page for
+  a foreign product as for a nonexistent one.
+* `get_product!/1` — an unfiltered primary-key getter that predated ownership —
+  was **removed**. With owner-scoped rows in the table it was a guaranteed IDOR
+  footgun and it had no callers.
+
+### `owner_id` is not an input
+
+* `owner_id` is absent from `Product.changeset/2`'s cast list, so Ecto drops it
+  from `params` before validation; `create_owned_product/3` writes
+  `scope.user.id` itself. A submitted `owner_id` is **ignored, not rejected**:
+  there is no error to teach an attacker the field exists, and the resulting
+  product still belongs to whoever is signed in.
+* Ownership is immutable after creation, since `Product.update_changeset/2` does
+  not cast it either. There is no transfer API, route, or UI.
+* `owner_label/2` renders "Yours" / "Seller" / "Platform" in the management UI
+  and the owner's email is never rendered. The public queries do not preload the
+  `:owner` association, and the public layer — product pages, category pages,
+  search, sitemap, and JSON-LD — never reads, renders, or serializes
+  `owner_id`/`owner`. The column still exists on the struct those queries
+  return, so the guarantee is enforced by the public code path (covered by
+  `test/cass/catalog_ownership_test.exs` and
+  `test/cass_web/live/catalog_pages_test.exs`), not by the schema.
+
+### Web layer
+
+* `/manage/products`, `/manage/products/new`, and `/manage/products/:id/edit`
+  sit behind `require_vendor_or_admin_user` (plug) **and**
+  `on_mount(:require_vendor_or_admin)` (LiveView), so a guest is sent to log in
+  and a customer is redirected away with a "not authorized" flash.
+* The nav link is rendered from the same `can_create_owned_product?/1` predicate
+  the context enforces, so the UI cannot advertise an area the context refuses.
+* The pages carry `robots: noindex, nofollow`.
+* Every action re-resolves the product through `get_managed_product/2` with the
+  socket's `current_scope`, so a tampered `product_id` in an event payload
+  resolves to nothing — the same treatment as a guessed URL.
+
+### Deleting an account is a database decision
+
+`on_delete: :restrict` means the database refuses to delete a user who still
+owns a product. `Cass.Accounts` has no `delete_user/1` today, so the constraint
+is currently a guard rail; when account deletion lands it must transfer or
+archive first. This is why ownership **transfer** is deferred rather than
+skipped: it is the operation that would have to be designed and authorized
+before deletion could be offered.
+
+### Deliberate limitations (Milestone 3 Phase 3)
+
+* **No transfer.** An account that loses the `:vendor` role keeps managing the
+  products it already owns (the owner branch does not re-check roles), and
+  there is no way to hand a product to another account — not through the UI, not
+  through the context.
+* **No suspended/disabled state.** The owner branch does not require a current
+  role, so a revoked vendor keeps managing their catalog. That is intentional
+  (revoking a role should not orphan a seller's products, and there is no
+  transfer feature to migrate them with), but a future moderation feature may
+  want an explicit `suspended_at`.
+* **The management area is minimal by design** — list, create, edit, publish,
+  archive. No pricing, orders, payouts, or onboarding, so there is no second
+  authorization surface to review yet.
+* **No audit trail** for publish/archive/ownership changes, consistent with
+  Phase 2's role limitation.
 
 ## Input handling conventions (for future features)
 
@@ -293,9 +411,9 @@ admin, and it is deliberately awkward:
     listings and marked `robots: noindex, follow`.
   * Unknown/restricted slugs render an in-page not-found state with `noindex`
     rather than leaking row existence.
-* Foreign keys (`category_id`, `parent_id`) are never accepted from params;
-  they are set programmatically, and create/update guard against archived
-  parents/categories.
+* Foreign keys (`category_id`, `parent_id`, `owner_id`) are never accepted from
+  params; they are set programmatically, and create/update guard against
+  archived parents/categories.
 * Slugs are validated (`[a-z0-9]+(?:-[a-z0-9]+)*`, length-capped) and unique
   at the database level; category names are unique among siblings
   case-insensitively via partial unique indexes.

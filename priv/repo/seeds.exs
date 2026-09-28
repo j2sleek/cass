@@ -1,6 +1,11 @@
 # Seeds the dev database with the public storefront foundation: the three root
 # catalog categories and one published public product per category.
 #
+# Every seeded product is **platform-owned** (`owner_id IS NULL`): the seeder is
+# a trusted server path, so it uses the platform creation and publication
+# functions rather than the scope-authorized ones. No user accounts are created
+# and no product is attributed to one.
+#
 #     mix run priv/repo/seeds.exs
 alias Cass.Catalog
 
@@ -88,9 +93,12 @@ defmodule Cass.Seeds.CatalogSeeder do
   defp seed_product(category, attrs) do
     case Catalog.get_public_product_by_slug(attrs.slug) do
       nil ->
+        # `create_product/2` and `publish_platform_product/1` are the trusted
+        # platform path: the product is created and published with no owner
+        # (`owner_id IS NULL`), which is what makes it a platform product.
         {:ok, product} = Catalog.create_product(category, attrs)
-        {:ok, published} = Catalog.publish_product(product)
-        IO.puts("  seeded product: #{published.name}")
+        {:ok, published} = Catalog.publish_platform_product(product)
+        IO.puts("  seeded product: #{published.name} (platform-owned)")
 
       _ ->
         IO.puts("  product exists: #{attrs.slug}")

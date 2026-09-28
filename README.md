@@ -4,14 +4,16 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 3 Phase 2 (accounts, authentication, and the role
-foundation).** This release ships the server-rendered storefront catalog, a
+**Status: Milestone 3 Phase 3 (product ownership and ownership-safe
+management).** This release ships the server-rendered storefront catalog, a
 complete, session-based account system (registration with emailed confirmation,
 login with an optional 14-day remembered session, password reset, and account
-settings), and a minimal role system: every account is a customer, and
-`:admin`/`:vendor` are explicit grants read from the database on each request.
-Admin/vendor areas, ownership, checkout, payments, and AI features arrive in
-later milestones and are **not** available yet.
+settings), a minimal role system where every account is a customer and
+`:admin`/`:vendor` are explicit grants read from the database on each request,
+and product ownership: a product either belongs to the platform
+(`owner_id IS NULL`) or to one account, with a protected `/manage/products`
+area for sellers and admins. Checkout, payments, transfers, and AI features
+arrive in later milestones and are **not** available yet.
 
 ## Requirements
 
@@ -94,9 +96,49 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   email, takes the password from `--password`/`CASS_ADMIN_PASSWORD`, refuses to
   run in production without `--force`, and is safe to re-run. The first account
   to register is never auto-promoted.
-* **Not yet exposed** — no admin dashboard, vendor onboarding, product
-  ownership, or role-management UI; the guards are in place for the phases that
-  will use them, and nothing is half-protected in the meantime.
+* **Not yet exposed** — no admin dashboard, vendor onboarding, or
+  role-management UI; the guards are in place for the phases that will use
+  them, and nothing is half-protected in the meantime.
+
+### Product ownership (Milestone 3 Phase 3)
+
+* **Nullable owner, no fake owners** — `cass_products.owner_id` references
+  `cass_users.id` and is nullable; `NULL` means the product belongs to CASS
+  itself. No system account, no placeholder user, and no backfill: the existing
+  products simply stay platform-owned.
+* **`ON DELETE RESTRICT`, indexed, not unique** — one account may own many
+  products, and the database refuses to delete an account that still owns one,
+  so a future `delete_user/1` cannot silently orphan or cascade a catalog.
+  See [docs/data-model.md](docs/data-model.md).
+* **Ownership is data, not a capability** — it is a fact about a product and is
+  independent of the roles that grant the ability to act on it. A vendor owns
+  and manages their own products; an admin owns products and manages anyone's;
+  a customer or guest can do neither; and a platform product is admin-only,
+  because it has no owner to match.
+* **Authorization lives in the context** — `create_owned_product/3`,
+  `update_product/3`, `publish_product/2`, and `archive_product/2` all take the
+  caller's `Cass.Accounts.Scope` as their first argument and check
+  `can_create_owned_product?/1` or `can_manage_product?/2` before touching a
+  row, so a caller reaching the context directly cannot skip the check.
+  See [docs/security.md](docs/security.md).
+* **Ownership is never read from the client** — `owner_id` is absent from the
+  product changeset's cast list and `create_owned_product/3` writes
+  `scope.user.id` itself, so a submitted `owner_id` is ignored rather than
+  obeyed. There is no transfer API or UI, so ownership cannot change after
+  creation by any means.
+* **Reads are scoped, and refusals are not enumerable** —
+  `list_managed_products/1` and `get_managed_product/2` filter by the caller's
+  rights in SQL and return `nil` for anything else, so a guessed product id is
+  indistinguishable from one that does not exist. The unfiltered
+  `get_product!/1` getter was removed for the same reason.
+* **A small protected surface** — `/manage/products` (list, publish, archive),
+  `/manage/products/new`, and `/manage/products/:id/edit`, behind
+  `require_vendor_or_admin_user` and the matching `on_mount` hook, with
+  `noindex` metadata. It is a boundary proof, not a seller dashboard: no
+  pricing, orders, payouts, or onboarding.
+* **Public behavior is unchanged** — the storefront, its queries, URLs, SEO,
+  and JSON-LD are untouched, and no owner information is rendered or exposed
+  publicly.
 
 ### Catalog (Milestone 2)
 
@@ -139,11 +181,13 @@ See [docs/architecture.md](docs/architecture.md) for details.
 2. ~~Storefront catalog pages~~
 3. ~~Accounts and authentication~~
 4. ~~Roles and authorization foundation (`:admin`/`:vendor`, guards)~~
-5. Vendor onboarding and product ownership, admin dashboard, profile, and
-   account deletion
-6. Checkout and order flow
-7. AI tools routed through the Nexus AI Gateway
-8. JSON catalog API under `/api/v1` (optional, additive)
+5. ~~Product ownership and ownership-safe management~~
+6. Vendor onboarding, admin dashboard, profile, and account deletion
+   (ownership *transfer* is deliberately deferred: deleting an account that
+   still owns products is refused by the database)
+7. Checkout and order flow
+8. AI tools routed through the Nexus AI Gateway
+9. JSON catalog API under `/api/v1` (optional, additive)
 
 Payments, physical product fulfillment, and live AI integrations are scoped to
 later milestones.

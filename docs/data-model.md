@@ -57,11 +57,32 @@ duplicate sibling names regardless of case.
 | `seo_description` | string | Optional                                  |
 | `canonical_url` | string    | Optional/reserved alternate canonical, validated as absolute http(s) |
 | `published_at`| utc_datetime | Null until publish; public queries require `published_at <= now` (`nil` = not due) |
+| `owner_id`   | bigint      | FK `cass_users` (`on_delete: :restrict`), **nullable**, indexed. `NULL` = platform-owned |
 | `inserted_at` / `updated_at` | utc_datetime | |
 
-Index: unique `slug`. CHECK constraints enforce the enum domains
+Index: unique `slug`, plus a plain (non-unique) `owner_id` index for the
+seller's "my products" query. CHECK constraints enforce the enum domains
 (`product_type`, `status`, `visibility`); the publish-only-drafts and
 publish-into-active-category guards live in the `Cass.Catalog` context layer.
+
+#### `owner_id` (Milestone 3 Phase 3)
+
+* **Nullable, and `NULL` means the platform.** A product is either CASS's own or
+  one account's. No system/platform user exists, no row was backfilled, and the
+  six products that existed before this phase are still platform-owned — the
+  smallest truthful state, and one that needs no fake data to be correct.
+* **`on_delete: :restrict`.** Deleting an account that still owns a product is
+  refused by the database (`confdeltype = 'r'`). `Cass.Accounts` has no
+  `delete_user/1` yet, so this is a guard rail rather than a live code path: when
+  account deletion lands it must transfer or archive first. Cascading would
+  silently destroy a catalog, and nulling the owner would quietly hand a seller's
+  listings to the platform, so neither is acceptable.
+* **Indexed, not unique.** One account owns many products, and a seller's
+  management listing filters on `owner_id`.
+* **Not castable.** `owner_id` is absent from `Cass.Catalog.Product.changeset/2`'s
+  cast list; `Cass.Catalog.create_owned_product/3` writes `scope.user.id` with
+  `put_change/3`. A submitted `owner_id` is ignored, and no code path transfers
+  ownership.
 
 ### Timestamps and `:utc_datetime`
 
@@ -161,7 +182,21 @@ contexts use.
 * Slugs are globally unique across both tables and validated against the
   lowercase/hyphen regex (`Cass.Catalog.Validators.slug_format`).
 * Products always belong to a category; `category_id` is never taken from
-  user params.
+  user params (the posted id is resolved to a `%Category{}` first).
+* Product ownership is a fact about the product, independent of the roles that
+  grant the ability to act on it:
+  * `can_create_owned_product?/1` — authenticated **and** `:vendor` or
+    `:admin` (`:admin` qualifies on its own).
+  * `can_manage_product?/2` — `:admin`, or `product.owner_id == scope.user.id`.
+    A platform product has no owner, so only the admin branch can match it.
+  * Every product mutation takes the scope first
+    (`update_product/3`, `publish_product/2`, `archive_product/2`) and checks
+    authorization before touching the row.
+  * `list_managed_products/1` and `get_managed_product/2` filter by the caller's
+    rights in SQL; anything else is `nil`, so a product that does not exist and a
+    product belonging to somebody else are indistinguishable.
+  * There is no transfer: ownership is set at creation and cannot be changed by
+    any exposed path.
 * Publishing stamps `published_at`, requires a `:draft` product **and** an
   `:active` category, and re-publishing or publishing into an archived
   category returns `{:error, changeset}`.
@@ -225,10 +260,14 @@ contexts use.
 * `downloads` / `entitlements` — digital product access grants.
 * `prices` as integer minor units (`price_cents`, plain `integer`, no
   floats), currency defaulting to `USD`.
-* `seller_id` FK on products when vendor onboarding lands, plus the ownership
-  columns that phase introduces. Roles already exist
-  (`cass_user_roles`), so vendor onboarding only has to add the ownership
-  relationship — not a role system.
+* Vendor onboarding (the `vendor` profile/business columns). Roles already exist
+  (`cass_user_roles`) and product ownership exists (`cass_products.owner_id`), so
+  onboarding has to add neither a role system nor an ownership column.
+* **Ownership transfer** is deliberately not planned as a column change. When it
+  is designed, the `on_delete: :restrict` FK is the forcing function: deleting an
+  account that owns products must be refused or explicitly resolved first.
+* An account-deletion or credential-history table, if a later hardening phase
+  needs one.
 * An account-deletion or credential-history table, if a later hardening phase
   needs one.
 

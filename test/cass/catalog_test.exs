@@ -1,7 +1,19 @@
 defmodule Cass.CatalogTest do
   use Cass.DataCase, async: true
 
+  import Cass.AccountsFixtures
+
+  alias Cass.Accounts.Scope
   alias Cass.Catalog
+
+  # Every product in this file is created through the platform path, so it has no
+  # owner, and a platform-owned product is manageable by an admin and by nobody
+  # else. The lifecycle is therefore driven with an admin scope here; owner-scoped
+  # and cross-seller behavior is covered in `catalog_ownership_test.exs`.
+  setup do
+    admin = admin_fixture()
+    %{admin: admin, admin_scope: Scope.for_user(admin)}
+  end
 
   describe "categories" do
     test "create_category/1 creates an active root category" do
@@ -146,11 +158,11 @@ defmodule Cass.CatalogTest do
       )
     end
 
-    defp create_published!(overrides \\ %{}, product_overrides \\ %{}) do
+    defp create_published!(admin_scope, overrides \\ %{}, product_overrides \\ %{}) do
       attrs = Map.merge(product_attrs(), product_overrides)
       {:ok, category} = Catalog.create_category(overrides[:category] || category_attrs())
       {:ok, product} = Catalog.create_product(category, attrs)
-      {:ok, published} = Catalog.publish_product(product)
+      {:ok, published} = Catalog.publish_product(admin_scope, product)
       {category, published}
     end
 
@@ -164,6 +176,7 @@ defmodule Cass.CatalogTest do
       assert product.status == :draft
       assert product.visibility == :private
       assert product.published_at == nil
+      assert product.owner_id == nil
     end
 
     test "create_product/2 refuses an archived category" do
@@ -216,63 +229,76 @@ defmodule Cass.CatalogTest do
       assert "must be an absolute http(s) URL" in errors_on(changeset).canonical_url
     end
 
-    test "update_product/2 freezes the slug once published" do
-      {category, published} = create_published!()
-      assert {:ok, _} = Catalog.update_product(published, %{name: "Renamed"})
+    test "update_product/3 freezes the slug once published", %{admin_scope: admin_scope} do
+      {category, published} = create_published!(admin_scope)
+      assert {:ok, _} = Catalog.update_product(admin_scope, published, %{name: "Renamed"})
 
       assert {:error, changeset} =
-               Catalog.update_product(published, %{slug: "new-slug"})
+               Catalog.update_product(admin_scope, published, %{slug: "new-slug"})
 
       assert "cannot be changed once the product is published" in errors_on(changeset).slug
 
       assert {:ok, draft} =
                Catalog.create_product(category, product_attrs(%{slug: "draft-slug"}))
 
-      assert {:ok, moved} = Catalog.update_product(draft, %{slug: "draft-slug-2"})
+      assert {:ok, moved} = Catalog.update_product(admin_scope, draft, %{slug: "draft-slug-2"})
       assert moved.slug == "draft-slug-2"
     end
 
-    test "update_product/2 refuses archived products" do
-      {_category, published} = create_published!()
-      {:ok, archived} = Catalog.archive_product(published)
+    test "update_product/3 refuses archived products", %{admin_scope: admin_scope} do
+      {_category, published} = create_published!(admin_scope)
+      {:ok, archived} = Catalog.archive_product(admin_scope, published)
 
-      assert {:error, changeset} = Catalog.update_product(archived, %{name: "Nope"})
+      assert {:error, changeset} = Catalog.update_product(admin_scope, archived, %{name: "Nope"})
       assert "archived products cannot be modified" in errors_on(changeset).base
     end
 
-    test "publish_product/1 stamps published_at and rejects non-drafts" do
-      {_category, published} = create_published!()
+    test "publish_product/2 stamps published_at and rejects non-drafts", %{
+      admin_scope: admin_scope
+    } do
+      {_category, published} = create_published!(admin_scope)
       assert published.status == :published
       assert published.published_at != nil
 
-      assert {:error, changeset} = Catalog.publish_product(published)
+      assert {:error, changeset} = Catalog.publish_product(admin_scope, published)
       assert "only draft products can be published" in errors_on(changeset).status
     end
 
-    test "publish_product/1 refuses products in archived categories" do
+    test "publish_product/2 refuses products in archived categories", %{
+      admin_scope: admin_scope
+    } do
       {:ok, category} = Catalog.create_category(category_attrs())
       {:ok, product} = Catalog.create_product(category, product_attrs())
       {:ok, _} = Catalog.archive_category(category)
 
-      assert {:error, changeset} = Catalog.publish_product(product)
+      assert {:error, changeset} = Catalog.publish_product(admin_scope, product)
       assert "cannot publish products in an archived category" in errors_on(changeset).category_id
     end
 
-    test "archive_product/1 removes products from public queries" do
-      {_category, published} = create_published!()
+    test "archive_product/2 removes products from public queries", %{admin_scope: admin_scope} do
+      {_category, published} = create_published!(admin_scope)
       assert [_] = Catalog.list_public_products()
-      {:ok, archived} = Catalog.archive_product(published)
+      {:ok, archived} = Catalog.archive_product(admin_scope, published)
       assert archived.status == :archived
       assert Catalog.list_public_products() == []
       assert Catalog.get_public_product_by_slug("sample-product") == nil
 
-      assert {:error, changeset} = Catalog.archive_product(archived)
+      assert {:error, changeset} = Catalog.archive_product(admin_scope, archived)
       assert "product is already archived" in errors_on(changeset).base
+    end
+
+    test "publish_platform_product/1 publishes a platform product without a scope" do
+      {:ok, category} = Catalog.create_category(category_attrs())
+      {:ok, product} = Catalog.create_product(category, product_attrs())
+
+      assert {:ok, published} = Catalog.publish_platform_product(product)
+      assert published.status == :published
+      assert published.owner_id == nil
     end
   end
 
   describe "public product queries" do
-    setup do
+    setup %{admin_scope: admin_scope} do
       {:ok, category} =
         Catalog.create_category(%{name: "Digital Products", slug: "digital-products"})
 
@@ -284,7 +310,7 @@ defmodule Cass.CatalogTest do
           visibility: :public
         })
 
-      {:ok, published} = Catalog.publish_product(product)
+      {:ok, published} = Catalog.publish_product(admin_scope, product)
       %{category: category, product: published}
     end
 
@@ -295,7 +321,8 @@ defmodule Cass.CatalogTest do
     end
 
     test "list_public_products/0 excludes drafts, archived, and private items", %{
-      category: category
+      category: category,
+      admin_scope: admin_scope
     } do
       {:ok, draft} =
         Catalog.create_product(category, %{
@@ -313,8 +340,8 @@ defmodule Cass.CatalogTest do
           visibility: :public
         })
 
-      {:ok, _} = Catalog.publish_product(archived)
-      {:ok, _} = Catalog.archive_product(archived)
+      {:ok, _} = Catalog.publish_product(admin_scope, archived)
+      {:ok, _} = Catalog.archive_product(admin_scope, archived)
 
       {:ok, private} =
         Catalog.create_product(category, %{
@@ -324,7 +351,7 @@ defmodule Cass.CatalogTest do
           visibility: :private
         })
 
-      {:ok, _} = Catalog.publish_product(private)
+      {:ok, _} = Catalog.publish_product(admin_scope, private)
 
       slugs = Enum.map(Catalog.list_public_products(), & &1.slug)
       refute Enum.member?(slugs, draft.slug)
@@ -333,7 +360,7 @@ defmodule Cass.CatalogTest do
     end
 
     test "list_public_products/0 excludes unlisted but serves them by direct lookup",
-         %{category: category} do
+         %{category: category, admin_scope: admin_scope} do
       {:ok, unlisted} =
         Catalog.create_product(category, %{
           name: "Unlisted",
@@ -342,13 +369,16 @@ defmodule Cass.CatalogTest do
           visibility: :unlisted
         })
 
-      {:ok, published} = Catalog.publish_product(unlisted)
+      {:ok, published} = Catalog.publish_product(admin_scope, unlisted)
 
       refute Enum.member?(Enum.map(Catalog.list_public_products(), & &1.slug), "unlisted-item")
       assert Catalog.get_public_product_by_slug("unlisted-item").id == published.id
     end
 
-    test "list_public_products/0 excludes not-yet-due products", %{category: category} do
+    test "list_public_products/0 excludes not-yet-due products", %{
+      category: category,
+      admin_scope: admin_scope
+    } do
       {:ok, future} =
         Catalog.create_product(category, %{
           name: "Future",
@@ -357,7 +387,7 @@ defmodule Cass.CatalogTest do
           visibility: :public
         })
 
-      {:ok, published} = Catalog.publish_product(future)
+      {:ok, published} = Catalog.publish_product(admin_scope, future)
 
       {:ok, scheduled} =
         published
@@ -380,7 +410,10 @@ defmodule Cass.CatalogTest do
       assert Catalog.get_public_product_by_slug("public-product") == nil
     end
 
-    test "list_public_products_by_category/1 returns only direct products", %{category: category} do
+    test "list_public_products_by_category/1 returns only direct products", %{
+      category: category,
+      admin_scope: admin_scope
+    } do
       {:ok, child} = Catalog.create_child_category(category, %{name: "Child", slug: "child"})
 
       {:ok, nested} =
@@ -391,7 +424,7 @@ defmodule Cass.CatalogTest do
           visibility: :public
         })
 
-      {:ok, _} = Catalog.publish_product(nested)
+      {:ok, _} = Catalog.publish_product(admin_scope, nested)
 
       assert [only] = Catalog.list_public_products_by_category(category)
       assert only.slug == "public-product"
@@ -400,7 +433,8 @@ defmodule Cass.CatalogTest do
     end
 
     test "get_public_product_by_slug/1 returns nil for unknown and private slugs", %{
-      product: product
+      product: product,
+      admin_scope: admin_scope
     } do
       assert Catalog.get_public_product_by_slug("public-product").id == product.id
       assert Catalog.get_public_product_by_slug("nope") == nil
@@ -413,7 +447,7 @@ defmodule Cass.CatalogTest do
           visibility: :private
         })
 
-      {:ok, _} = Catalog.publish_product(private)
+      {:ok, _} = Catalog.publish_product(admin_scope, private)
       assert Catalog.get_public_product_by_slug("private-item") == nil
     end
   end

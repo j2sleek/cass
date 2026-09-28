@@ -88,6 +88,19 @@ defmodule CassWeb.Layouts do
             </a>
 
             <%= if Scope.authenticated?(@current_scope) do %>
+              <%!-- One place decides who sees the management link, and it is the
+                    same predicate the Catalog context authorizes creation with,
+                    so the nav can never advertise an area the context would
+                    refuse. --%>
+              <.link
+                :if={Cass.Catalog.can_create_owned_product?(@current_scope)}
+                navigate={~p"/manage/products"}
+                id="nav-manage-products"
+                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+              >
+                Manage products
+              </.link>
+
               <.link
                 navigate={~p"/users/settings"}
                 id="nav-settings"

@@ -19,13 +19,14 @@ defmodule CassWeb.UserAuth do
   `Cass.Accounts.Scope` loads the roles of the resolved user from
   `cass_user_roles` every time a scope is built, so a grant or a revoke applies
   on the next request (or the next LiveView mount) without touching the session.
-  The guards below (`require_admin_user/2`, `require_vendor_user/2`, and the
-  `:require_admin` / `:require_vendor` LiveView hooks) are the only supported way
+  The guards below (`require_admin_user/2`, `require_vendor_user/2`,
+  `require_vendor_or_admin_user/2`, and the `:require_admin` / `:require_vendor` /
+  `:require_vendor_or_admin` LiveView hooks) are the only supported way
   to express a role requirement: they keep the decision in `Scope`, instead of
   spreading `Repo` queries and `user_roles` comparisons through every controller
-  and LiveView. No route uses the role guards yet — Milestone 3 Phase 2 ships
-  the mechanism, and the vendor and admin areas in later phases will be the
-  first users of it.
+  and LiveView. `/manage/products` (Milestone 3 Phase 3) is the first user of
+  the vendor-or-admin requirement, because owning and managing products is open
+  to either role while the storefront is open to neither.
 
   Nothing about the caller is ever read from the request body, query string, or
   from client-writable state other than the *signed* session cookie, and no
@@ -241,6 +242,10 @@ defmodule CassWeb.UserAuth do
     * `:require_admin` - same, but also requires the `:admin` role. A signed-in
       user without the role is redirected away with a "not authorized" message.
     * `:require_vendor` - same, but also requires the `:vendor` role.
+    * `:require_vendor_or_admin` - same, but requires the `:vendor` **or** the
+      `:admin` role. This is the gate for surfaces that either kind of account
+      may use (the product management area); it does not make an admin a vendor,
+      it just admits both.
 
   Role hooks are attached to a `live_session`, so listing one in the router
   applies it to every route in that session:
@@ -264,6 +269,10 @@ defmodule CassWeb.UserAuth do
 
   def on_mount(:require_vendor, _params, session, socket) do
     authorize(mount_current_scope(socket, session), :vendor)
+  end
+
+  def on_mount(:require_vendor_or_admin, _params, session, socket) do
+    authorize(mount_current_scope(socket, session), :vendor_or_admin)
   end
 
   defp mount_current_scope(socket, session) do
@@ -340,6 +349,19 @@ defmodule CassWeb.UserAuth do
     require_role(conn, :vendor)
   end
 
+  @doc """
+  Plug for routes that require the `:vendor` **or** the `:admin` role.
+
+  This is the gate for surfaces both kinds of account may use, such as the
+  product management area. Denied callers get exactly the same treatment as
+  with the single-role guards: a guest is sent to the login page with the
+  destination remembered, and a signed-in account without either role is
+  redirected to its settings page with a "not authorized" message.
+  """
+  def require_vendor_or_admin_user(conn, _opts) do
+    require_role(conn, :vendor_or_admin)
+  end
+
   defp require_role(conn, requirement) do
     case conn.assigns do
       %{current_scope: scope} ->
@@ -361,6 +383,10 @@ defmodule CassWeb.UserAuth do
   # The one place that answers "may this caller do this?" for the role guards,
   # so the LiveView hooks and the controller plugs cannot drift apart.
   defp authorized?(scope, :authenticated), do: Scope.authenticated?(scope)
+
+  defp authorized?(scope, :vendor_or_admin),
+    do: Scope.admin?(scope) or Scope.vendor?(scope)
+
   defp authorized?(scope, role), do: Scope.role?(scope, role)
 
   defp denied_message(scope) do

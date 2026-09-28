@@ -53,6 +53,19 @@ defmodule CassWeb.Router do
     get "/users/settings/confirm-email/:token", UserConfirmationController, :confirm_email
   end
 
+  ## Sellers and admins only: the protected product management area.
+
+  scope "/", CassWeb do
+    pipe_through [:browser, :require_vendor_or_admin_user]
+
+    live_session :require_vendor_or_admin,
+      on_mount: [{CassWeb.UserAuth, :require_vendor_or_admin}] do
+      live "/manage/products", ProductManagementLive, :index
+      live "/manage/products/new", ProductManagementLive, :new
+      live "/manage/products/:id/edit", ProductManagementLive, :edit
+    end
+  end
+
   scope "/api/v1", CassWeb.Api.V1 do
     pipe_through :api
 

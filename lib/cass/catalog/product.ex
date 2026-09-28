@@ -18,11 +18,26 @@ defmodule Cass.Catalog.Product do
     * `:unlisted` — accessible by direct slug but excluded from listings and
       marked `noindex` on the public page.
     * `:private` — never accessible through any public route.
+
+  Ownership:
+
+    * `owner_id == nil` — a **platform-owned** product: the platform's own
+      catalog, created by a trusted server path (seeds, operator tasks) and
+      manageable only by an admin.
+    * `owner_id == <user id>` — the product belongs to that account, which may
+      manage it along with admins.
+
+  Ownership is independent of `product_type`: any of the three product types
+  may be platform-owned or owned by a user. It is also independent of
+  `Cass.Accounts` roles: `:vendor` and `:admin` grant the *capability* to own
+  and manage, while `owner_id` records *whose* product it is. A plain customer
+  can never become an owner, so ownership never leaks into the public catalog.
   """
   use Ecto.Schema
 
   import Ecto.Changeset
 
+  alias Cass.Accounts.User
   alias Cass.Catalog.Category
 
   schema "cass_products" do
@@ -40,12 +55,34 @@ defmodule Cass.Catalog.Product do
 
     belongs_to :category, Category, foreign_key: :category_id
 
+    # `owner_id` is a plain nullable field, so a product with no owner — a
+    # platform-owned product — is valid rather than incomplete; nothing in the
+    # changesets marks it required. The association is only populated by
+    # `Cass.Catalog` (owner-scoped management reads), and `owner_id` is never
+    # part of the cast list, so no request can name the account a product
+    # belongs to.
+    belongs_to :owner, User
+
     timestamps(type: :utc_datetime)
   end
 
   @slug_regex ~r/\A[a-z0-9]+(?:-[a-z0-9]+)*\z/
 
-  @doc false
+  @doc """
+  Returns true when the product has no owner, i.e. it belongs to the platform.
+  """
+  def platform_owned?(%__MODULE__{owner_id: nil}), do: true
+  def platform_owned?(%__MODULE__{}), do: false
+
+  @doc """
+  Builds the changeset for creating a product.
+
+  `owner_id` is deliberately absent from the cast list, alongside `category_id`,
+  `status`, and `published_at`: it is set programmatically by
+  `Cass.Catalog.create_product/2` (as `nil`, for a platform-owned product) or by
+  `Cass.Catalog.create_owned_product/3` (from the authenticated scope's user).
+  Passing `owner_id` in `attrs` therefore has no effect.
+  """
   def changeset(product, attrs) do
     product
     |> cast(attrs, [
@@ -69,6 +106,7 @@ defmodule Cass.Catalog.Product do
     |> validate_length(:description, max: 4000)
     |> validate_canonical_url()
     |> unique_constraint(:slug)
+    |> assoc_constraint(:owner)
   end
 
   @doc false

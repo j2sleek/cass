@@ -1,12 +1,21 @@
 defmodule CassWeb.CatalogPagesTest do
   use CassWeb.ConnCase
 
+  import Cass.AccountsFixtures
   import Phoenix.LiveViewTest
 
+  alias Cass.Accounts.Scope
   alias Cass.Catalog
 
+  # The products here are platform products, so publishing and archiving them
+  # requires an admin scope. Public access itself is unchanged by ownership.
+  setup do
+    admin = admin_fixture()
+    %{admin: admin, admin_scope: Scope.for_user(admin)}
+  end
+
   describe "public catalog index" do
-    setup do
+    setup %{admin_scope: admin_scope} do
       {:ok, category} =
         Catalog.create_category(%{name: "Digital Products", slug: "digital-products"})
 
@@ -23,7 +32,7 @@ defmodule CassWeb.CatalogPagesTest do
           description: "A longer product description."
         })
 
-      {:ok, published} = Catalog.publish_product(product)
+      {:ok, published} = Catalog.publish_product(admin_scope, product)
       %{category: category, child: child, product: published}
     end
 
@@ -63,7 +72,7 @@ defmodule CassWeb.CatalogPagesTest do
   end
 
   describe "public category page" do
-    setup do
+    setup %{admin_scope: admin_scope} do
       {:ok, category} =
         Catalog.create_category(%{name: "Digital Products", slug: "digital-products"})
 
@@ -79,7 +88,7 @@ defmodule CassWeb.CatalogPagesTest do
           short_description: "A short blurb."
         })
 
-      {:ok, _} = Catalog.publish_product(product)
+      {:ok, _} = Catalog.publish_product(admin_scope, product)
       %{category: category, child: child, product: product}
     end
 
@@ -115,7 +124,7 @@ defmodule CassWeb.CatalogPagesTest do
   end
 
   describe "public product page" do
-    setup do
+    setup %{admin_scope: admin_scope} do
       {:ok, category} =
         Catalog.create_category(%{name: "Digital Products", slug: "digital-products"})
 
@@ -129,7 +138,7 @@ defmodule CassWeb.CatalogPagesTest do
           description: "A longer product description."
         })
 
-      {:ok, published} = Catalog.publish_product(product)
+      {:ok, published} = Catalog.publish_product(admin_scope, product)
       %{category: category, product: published}
     end
 
@@ -152,7 +161,8 @@ defmodule CassWeb.CatalogPagesTest do
                ~s(rel="canonical" href="#{CassWeb.Endpoint.url()}/catalog/products/sample-product")
     end
 
-    test "GET /catalog/products/:slug returns not found for unknown, draft, private, and archived" do
+    test "GET /catalog/products/:slug returns not found for unknown, draft, private, and archived",
+         %{admin_scope: admin_scope} do
       {:ok, category} = Catalog.create_category(%{name: "Hidden", slug: "hidden"})
 
       {:ok, draft} =
@@ -171,7 +181,7 @@ defmodule CassWeb.CatalogPagesTest do
           visibility: :private
         })
 
-      {:ok, published_private} = Catalog.publish_product(private)
+      {:ok, published_private} = Catalog.publish_product(admin_scope, private)
 
       {:ok, archived} =
         Catalog.create_product(category, %{
@@ -181,8 +191,8 @@ defmodule CassWeb.CatalogPagesTest do
           visibility: :public
         })
 
-      {:ok, published_archived} = Catalog.publish_product(archived)
-      {:ok, archived_product} = Catalog.archive_product(published_archived)
+      {:ok, published_archived} = Catalog.publish_product(admin_scope, archived)
+      {:ok, archived_product} = Catalog.archive_product(admin_scope, published_archived)
 
       for slug <- ["draft-item", "private-item", "archived-item", "missing-item"] do
         {:ok, view, _html} = live(build_conn(), "/catalog/products/#{slug}")
@@ -195,7 +205,8 @@ defmodule CassWeb.CatalogPagesTest do
       assert archived_product.status == :archived
     end
 
-    test "GET /catalog/products/:slug returns not found for products in archived categories" do
+    test "GET /catalog/products/:slug returns not found for products in archived categories",
+         %{admin_scope: admin_scope} do
       {:ok, category} = Catalog.create_category(%{name: "Soon Gone", slug: "soon-gone"})
 
       {:ok, product} =
@@ -206,14 +217,15 @@ defmodule CassWeb.CatalogPagesTest do
           visibility: :public
         })
 
-      {:ok, _} = Catalog.publish_product(product)
+      {:ok, _} = Catalog.publish_product(admin_scope, product)
       {:ok, _} = Catalog.archive_category(category)
 
       {:ok, view, _html} = live(build_conn(), "/catalog/products/doomed-product")
       assert has_element?(view, "#not-found")
     end
 
-    test "GET /catalog/products/:slug serves unlisted products but marks them noindex" do
+    test "GET /catalog/products/:slug serves unlisted products but marks them noindex",
+         %{admin_scope: admin_scope} do
       {:ok, category} = Catalog.create_category(%{name: "Tools", slug: "tools"})
 
       {:ok, unlisted} =
@@ -224,7 +236,7 @@ defmodule CassWeb.CatalogPagesTest do
           visibility: :unlisted
         })
 
-      {:ok, _} = Catalog.publish_product(unlisted)
+      {:ok, _} = Catalog.publish_product(admin_scope, unlisted)
 
       {:ok, view, html} = live(build_conn(), "/catalog/products/unlisted-item")
       assert has_element?(view, "h1", "Unlisted Item")

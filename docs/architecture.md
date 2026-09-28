@@ -34,12 +34,45 @@ can later be split if needed. The active stack:
     `/users/*`)
   * `scope "/", CassWeb` + `pipe_through [:browser, :require_authenticated_user]`
     — signed-in only (`/users/settings`)
+  * `scope "/", CassWeb` + `pipe_through [:browser, :require_vendor_or_admin_user]`
+    — sellers and admins only (`/manage/products*`)
   * `scope "/api/v1", CassWeb.Api.V1` — JSON API (currently only health)
 
-The role guards (`require_admin_user`, `require_vendor_user`) follow the same
-shape as `require_authenticated_user` and are available for a pipeline when the
-admin/vendor areas land; see
+The role guards (`require_admin_user`, `require_vendor_user`,
+`require_vendor_or_admin_user`) follow the same shape as
+`require_authenticated_user`; see
 [Accounts and current scope](#accounts-and-current-scope).
+
+## Product ownership and the management area (Milestone 3 Phase 3)
+
+* `Cass.Catalog.Product` gains a nullable `belongs_to :owner,
+  Cass.Accounts.User`. This is the **only** new edge between contexts, and it
+  points `Catalog → Accounts`, so no cycle is introduced (`Cass.Accounts` does
+  not reference `Cass.Catalog`).
+* Ownership is a property of the product, kept separate from roles. The
+  authorization predicates live in the context and are the only place the rule
+  is written:
+  * `can_create_owned_product?/1` — authenticated and `:vendor` or `:admin`.
+  * `can_manage_product?/2` — `:admin`, or the product's `owner_id` is the
+    caller's user id.
+* Product mutations take the caller's scope first
+  (`update_product/3`, `publish_product/2`, `archive_product/2`), so a caller
+  that reaches the context directly is still checked. Owner-scoped reads
+  (`list_managed_products/1`, `get_managed_product/2`) filter in SQL and return
+  `nil` rather than a row the caller may not see.
+* `create_product/2` remains the **platform** path for trusted server callers
+  (seeds, operator tasks) and pairs with `publish_platform_product/1`, which
+  refuses to publish an owned product. Nothing reachable from a request uses
+  either.
+* `CassWeb.ProductManagementLive` is the smallest surface that exercises the
+  boundary: `/manage/products` (list, publish, archive),
+  `/manage/products/new`, `/manage/products/:id/edit`. It is guarded twice (route
+  plug + `on_mount` hook) and re-resolves the product on **every** event, so a
+  tampered id behaves like a guessed URL. It is `noindex` and deliberately not a
+  seller dashboard.
+* The public catalog is untouched: same routes, queries, slugs, SEO, and
+  JSON-LD. Public queries do not preload `:owner`, and no public template,
+  sitemap entry, or JSON-LD block reads or renders `owner_id`/`owner`.
 
 ## Accounts and current scope
 

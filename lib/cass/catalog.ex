@@ -30,12 +30,60 @@ defmodule Cass.Catalog do
     are the only entry points for the web layer and never expose drafts,
     archived items, `:private` products, or products in non-`:active` categories.
 
-  Return conventions: `{:ok, record}` / `{:error, changeset}` / `nil`.
+  ## Ownership and authorization (Milestone 3 Phase 3)
+
+  A product either belongs to the platform (`owner_id == nil`) or to one
+  account (`owner_id == <user id>`). Ownership is a *fact about the product*,
+  not a capability, and it is fully independent of the `Cass.Accounts` roles
+  that grant the capability to act on it:
+
+    * `can_create_owned_product?/1` — the caller is authenticated **and** holds
+      `:vendor` or `:admin`. `:admin` grants this independently of `:vendor`.
+    * `can_manage_product?/2` — the caller is an `:admin`, or the product's
+      `owner_id` is the caller's own user id. A platform-owned product has no
+      owner, so only the admin branch can match it.
+
+  Every product mutation takes the caller's `Cass.Accounts.Scope` as its first
+  argument and checks `can_manage_product?/2` *before* touching the row, so
+  authorization cannot be skipped by a caller that reaches the context
+  directly. The refusal is an `{:error, changeset}` on `:base` with a message
+  that never distinguishes "not yours" from "does not exist", so a probe cannot
+  enumerate products.
+
+  The security property of creation is that **ownership always comes from the
+  trusted scope, never from `attrs`**: `owner_id` is absent from
+  `Cass.Catalog.Product.changeset/2`'s cast list, and
+  `create_owned_product/3` writes `scope.user.id` itself. A submitted
+  `owner_id` is therefore not rejected, it is ignored — there is no error to
+  teach an attacker what the field is for, and no code path where a request
+  names the account a product belongs to.
+
+  Ownership reads are separate from the public reads on purpose:
+  `list_managed_products/1` and `get_managed_product/2` scope a query by the
+  caller's rights (all products for an admin, only their own otherwise, nothing
+  for a guest) and return `nil` rather than a row the caller may not see. The
+  unfiltered `get_product!/1` getter that predated ownership has been removed:
+  with owner-scoped products in the table it is a guaranteed IDOR footgun, and
+  it had no callers.
+
+  `create_product/2` remains the **platform-owned** creation path for trusted
+  server callers (seeds, operator tasks) and still leaves `owner_id` unset. It
+  is never reachable from a request, and the matching `publish_platform_product/1`
+  refuses to publish an owned product, so a server path cannot quietly publish
+  somebody else's listing.
+
+  ## Return conventions
+
+  `{:ok, record}` / `{:error, changeset}` / `nil`.
   """
   import Ecto.Query, warn: false
 
+  alias Cass.Accounts.Scope
   alias Cass.Catalog.{Category, Product}
   alias Cass.Repo
+
+  @not_authorized_to_create "you are not authorized to create a product"
+  @not_authorized_to_manage "you are not authorized to manage this product"
 
   @doc "Returns all categories (any status), ordered by name."
   def list_categories do
@@ -70,6 +118,25 @@ defmodule Cass.Catalog do
 
   @doc "Fetches a category by id, raising if it does not exist."
   def get_category!(id), do: Repo.get!(Category, id)
+
+  @doc """
+  Fetches a category by id, returning `nil` when it does not exist.
+
+  Used where the id arrives from a form (which category should this product be
+  filed under?): the id only ever selects a row, and the resolved
+  `%Category{}` struct — not the id — is what `create_owned_product/3` is given,
+  so a tampered id cannot become a foreign key.
+  """
+  def get_category(id) when is_integer(id), do: Repo.get(Category, id)
+
+  def get_category(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {id, ""} -> get_category(id)
+      _not_a_number -> nil
+    end
+  end
+
+  def get_category(_id), do: nil
 
   @doc "Fetches a category by slug regardless of status."
   def get_category_by_slug(slug), do: Repo.get_by(Category, slug: slug)
@@ -175,10 +242,14 @@ defmodule Cass.Catalog do
     |> Repo.one()
   end
 
-  @doc "Fetches a product by id, raising if it does not exist."
-  def get_product!(id), do: Repo.get!(Product, id)
+  @doc """
+  Creates a platform-owned product that belongs to the given category.
 
-  @doc "Creates a product that belongs to the given category."
+  This is the trusted server path used by `priv/repo/seeds.exs` and operator
+  tasks: it sets no owner, leaving `owner_id` as `nil`, and it is not reachable
+  from a request. Use `create_owned_product/3` for anything driven by a signed-in
+  user.
+  """
   def create_product(%Category{status: :archived}, _attrs) do
     {:error,
      Ecto.Changeset.add_error(
@@ -196,21 +267,223 @@ defmodule Cass.Catalog do
   end
 
   @doc """
-  Updates a product. Rejects updates to archived products and any slug change
-  once the product is published.
+  Creates a product owned by the signed-in user of `scope`.
+
+  The owner is `scope.user.id` and nothing else: `:owner_id` is never cast, so
+  an `owner_id` in `attrs` is ignored rather than obeyed, and there is no way to
+  create a product owned by another account. `:vendor` and `:admin` are both
+  accepted, independently of each other; every other caller (an ordinary
+  customer, or a guest) is refused.
   """
-  def update_product(%Product{} = product, attrs) do
-    product
-    |> Product.update_changeset(attrs)
-    |> Repo.update()
+  def create_owned_product(%Scope{} = scope, %Category{} = category, attrs) do
+    cond do
+      not can_create_owned_product?(scope) ->
+        not_authorized(%Product{}, @not_authorized_to_create)
+
+      category.status == :archived ->
+        {:error,
+         Ecto.Changeset.add_error(
+           Ecto.Changeset.change(%Product{}),
+           :category_id,
+           "cannot add products to an archived category"
+         )}
+
+      true ->
+        owned_product_changeset(scope, category, attrs)
+        |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Builds (and validates) the changeset for the `create_owned_product/3` form
+  without inserting anything, so a form can show errors as it is typed.
+  """
+  def change_owned_product(%Scope{} = scope, %Category{} = category, attrs) do
+    if can_create_owned_product?(scope) do
+      {:ok, owned_product_changeset(scope, category, attrs)}
+    else
+      not_authorized(%Product{}, @not_authorized_to_create)
+    end
+  end
+
+  @doc """
+  Builds (and validates) the changeset for the `update_product/3` form, refusing
+  outright when the caller may not manage the product.
+  """
+  def change_product(%Scope{} = scope, %Product{} = product, attrs) do
+    if can_manage_product?(scope, product) do
+      {:ok, Product.update_changeset(product, attrs)}
+    else
+      not_authorized(product, @not_authorized_to_manage)
+    end
+  end
+
+  @doc """
+  Updates a product.
+
+  The caller must be allowed to manage the product (see `can_manage_product?/2`),
+  which is checked before the row is touched. Rejects updates to archived
+  products and any slug change once the product is published, exactly as before
+  ownership existed.
+  """
+  def update_product(%Scope{} = scope, %Product{} = product, attrs) do
+    if can_manage_product?(scope, product) do
+      product
+      |> Product.update_changeset(attrs)
+      |> Repo.update()
+    else
+      not_authorized(product, @not_authorized_to_manage)
+    end
   end
 
   @doc """
   Transitions a product from `:draft` to `:published`, stamping `published_at`
-  with the current time. Rejects publishing when the product is not a draft or
-  when its category is archived.
+  with the current time.
+
+  The caller must be allowed to manage the product, which matters most here:
+  publishing is what makes a seller's draft publicly visible. Rejects publishing
+  when the product is not a draft or when its category is archived.
   """
-  def publish_product(%Product{} = product) do
+  def publish_product(%Scope{} = scope, %Product{} = product) do
+    if can_manage_product?(scope, product) do
+      do_publish_product(product)
+    else
+      not_authorized(product, @not_authorized_to_manage)
+    end
+  end
+
+  @doc """
+  Publishes a **platform-owned** product from a trusted server path.
+
+  `create_product/2` has no scope to authorize against, so the seeds and
+  operator tasks that use it need a matching way to publish what they created.
+  It refuses a product that has an owner, which keeps the rule one-directional:
+  a server path can publish the platform's own products, and an owned product
+  can only be published by its owner or an admin through `publish_product/2`.
+  """
+  def publish_platform_product(%Product{} = product) do
+    if Product.platform_owned?(product) do
+      do_publish_product(product)
+    else
+      not_authorized(
+        product,
+        "only a platform-owned product can be published without a scope"
+      )
+    end
+  end
+
+  @doc "Archives a product, removing it from all public queries. Immutable afterwards."
+  def archive_product(%Scope{} = scope, %Product{} = product) do
+    cond do
+      not can_manage_product?(scope, product) ->
+        not_authorized(product, @not_authorized_to_manage)
+
+      product.status == :archived ->
+        {:error,
+         Ecto.Changeset.add_error(
+           Ecto.Changeset.change(product),
+           :base,
+           "product is already archived"
+         )}
+
+      true ->
+        product
+        |> Ecto.Changeset.change(status: :archived)
+        |> Repo.update()
+    end
+  end
+
+  ## Authorization
+
+  @doc """
+  Returns true when `scope` may create a product it owns.
+
+  That requires an authenticated scope holding `:vendor` or `:admin`. An admin
+  qualifies on its own: `:admin` grants the capability independently of
+  `:vendor`, and a plain customer or a guest never does.
+  """
+  def can_create_owned_product?(%Scope{} = scope) do
+    Scope.authenticated?(scope) and (Scope.admin?(scope) or Scope.vendor?(scope))
+  end
+
+  def can_create_owned_product?(_scope), do: false
+
+  @doc """
+  Returns true when `scope` may update, publish, or archive `product`.
+
+  An `:admin` may manage any product, including a platform-owned one. Everyone
+  else may only manage a product whose `owner_id` is their own user id, which
+  makes a platform-owned product (`owner_id == nil`) admin-only: the owner
+  comparison can never match `nil`, and a guest has no user id to match either.
+
+  Because only `:vendor` and `:admin` can create an owned product, the owner
+  branch can only ever be reached by an account that held one of those roles;
+  an ordinary customer owns nothing and therefore manages nothing. Note that
+  the owner branch deliberately does not re-check the caller's roles, so revoking
+  `:vendor` stops new products from being created without orphaning the
+  products that already exist. Reassigning them is a transfer feature, which
+  this phase does not implement.
+  """
+  def can_manage_product?(%Scope{} = scope, %Product{} = product) do
+    Scope.admin?(scope) or
+      (Scope.authenticated?(scope) and product.owner_id == scope.user.id)
+  end
+
+  def can_manage_product?(_scope, _product), do: false
+
+  @doc """
+  Returns the products `scope` is allowed to manage: every product for an admin,
+  only the caller's own products for everybody else, and nothing for a guest.
+  """
+  def list_managed_products(%Scope{} = scope) do
+    case manageable_products_query(scope) do
+      nil -> []
+      query -> Repo.all(query)
+    end
+  end
+
+  def list_managed_products(_scope), do: []
+
+  @doc """
+  Fetches a product by id **only if** `scope` may manage it, returning `nil`
+  otherwise.
+
+  A missing product and a product belonging to somebody else are deliberately
+  indistinguishable: both are `nil`. This is the query the management surface
+  uses instead of a bare primary-key fetch, so knowing another seller's product
+  id, slug, or URL is not enough to load it.
+  """
+  def get_managed_product(%Scope{} = scope, product_id) when is_integer(product_id) do
+    case manageable_products_query(scope) do
+      nil ->
+        nil
+
+      query ->
+        case Repo.one(from p in query, where: p.id == ^product_id) do
+          nil -> nil
+          product -> preload_management(product)
+        end
+    end
+  end
+
+  def get_managed_product(%Scope{} = scope, product_id) when is_binary(product_id) do
+    case Integer.parse(product_id) do
+      {product_id, ""} -> get_managed_product(scope, product_id)
+      _not_a_number -> nil
+    end
+  end
+
+  def get_managed_product(_scope, _product_id), do: nil
+
+  ## Shared internals
+  defp owned_product_changeset(%Scope{} = scope, %Category{} = category, attrs) do
+    %Product{}
+    |> Product.changeset(attrs)
+    |> Ecto.Changeset.put_change(:category_id, category.id)
+    |> Ecto.Changeset.put_change(:owner_id, scope.user.id)
+  end
+
+  defp do_publish_product(%Product{} = product) do
     product = Repo.preload(product, :category)
 
     cond do
@@ -237,21 +510,35 @@ defmodule Cass.Catalog do
     end
   end
 
-  @doc "Archives a product, removing it from all public queries. Immutable afterwards."
-  def archive_product(%Product{status: :archived} = product) do
-    {:error,
-     Ecto.Changeset.add_error(
-       Ecto.Changeset.change(product),
-       :base,
-       "product is already archived"
-     )}
+  # The single shape of an authorization failure. Returning it as a changeset
+  # error (rather than raising or returning a distinct not-found) keeps the
+  # refusal non-enumerable and lets a form render it like any other error.
+  defp not_authorized(struct, message) do
+    {:error, Ecto.Changeset.add_error(Ecto.Changeset.change(struct), :base, message)}
   end
 
-  def archive_product(%Product{} = product) do
-    product
-    |> Ecto.Changeset.change(status: :archived)
-    |> Repo.update()
+  defp managed_products_query do
+    from p in Product, order_by: [asc: p.name, asc: p.id], preload: [:category, :owner]
   end
+
+  # The ownership filter is part of the query rather than a check applied to a
+  # fetched row, so "manageable" is expressed exactly once and a row the caller
+  # may not see is never loaded in the first place. Returns `nil` when nothing
+  # can match, which is the case for a guest.
+  defp manageable_products_query(%Scope{} = scope) do
+    cond do
+      Scope.admin?(scope) ->
+        managed_products_query()
+
+      Scope.authenticated?(scope) ->
+        where(managed_products_query(), [p], p.owner_id == ^scope.user.id)
+
+      true ->
+        nil
+    end
+  end
+
+  defp preload_management(%Product{} = product), do: Repo.preload(product, [:category, :owner])
 
   defp public_product_query(query) do
     now = utc_now()
