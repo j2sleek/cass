@@ -36,6 +36,35 @@ defmodule CassWeb.UserRegistrationLiveTest do
     end
   end
 
+  describe "the submit button" do
+    test "renders the caller-provided type as the sole type attribute" do
+      # Regression: the button component used to render a hardcoded
+      # `type="button"` followed by the splatted `type="submit"`, and browsers
+      # honor the first duplicate attribute, so submit buttons never submitted.
+      html =
+        render_component(&CassWeb.CoreComponents.button/1, %{
+          type: "submit",
+          inner_block: [%{__slot__: :inner_block, inner_block: fn _, _ -> "Create account" end}]
+        })
+
+      assert Regex.scan(~r/\btype=/, html) |> length() == 1
+      assert html =~ ~s(type="submit")
+      refute html =~ ~s(type="button")
+    end
+
+    test "renders the create-account button as a real submit button on the page", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/users/register")
+
+      [button_tag] =
+        Regex.scan(~r{<button[^>]*phx-disable-with="Creating account\.\.\."[^>]*>}, html)
+        |> List.flatten()
+
+      assert Regex.scan(~r/\btype=/, button_tag) |> length() == 1
+      assert button_tag =~ ~s(type="submit")
+      refute button_tag =~ ~s(type="button")
+    end
+  end
+
   describe "validating the form" do
     test "rejects a short password", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/users/register")

@@ -127,7 +127,7 @@ defmodule CassWeb.CoreComponents do
       """
     else
       ~H"""
-      <button type="button" class={@class} {@rest}>
+      <button class={@class} {@rest}>
         {render_slot(@inner_block)}
       </button>
       """
