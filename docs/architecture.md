@@ -74,6 +74,109 @@ The role guards (`require_admin_user`, `require_vendor_user`,
   JSON-LD. Public queries do not preload `:owner`, and no public template,
   sitemap entry, or JSON-LD block reads or renders `owner_id`/`owner`.
 
+## Products, variants, and fulfillment (Milestone 4)
+
+Everything sold on CASS is a **Product**. The domain model is
+`Category → Product → Product Type → Product Variant → Order Item` (order items
+and fulfillment integrations land with checkout in a later milestone):
+
+* A **Product** is what a seller describes and lists: name, description, SEO,
+  category, status/visibility lifecycle, and ownership. It says nothing about
+  price or quantity.
+* A **Product Type** is the closed vocabulary of what can be sold:
+  `:digital`, `:smm`, `:ai`, `:service`. It is owned by
+  `Cass.Catalog.product_types/0` and mirrored by a database CHECK constraint
+  (`cass_products_product_type_check`), the same single-source
+  vocabulary-plus-constraint pattern used for roles (Phase 2). The former
+  values `digital_product` / `smm_service` / `ai_tool` were renamed in a
+  deterministic data migration (`digital_product→digital`, `smm_service→smm`,
+  `ai_tool→ai`); `:service` is new for human-performed work (the first seed is
+  the platform's "Manual SEO Audit").
+* A **Product Variant** carries what checkout will need: price
+  (`price_cents` integer minor units, `currency` defaulting to `USD`), stock
+  (`null` = unlimited), and a type-specific `config` JSONB blob (string keys
+  only) for purchasable wiring (e.g. `{platform: "tiktok", target_type:
+  "followers"}`). Variants are `active` and `sort_order`-ed, purchasable when
+  `active` and not out of stock, and named per product
+  (`lower(name)` unique within a product) with a globally unique, nullable
+  `sku`. A product with no active variants effectively cannot be bought yet.
+* Variant mutations reuse the exact Phase 3 ownership surface: every
+  `create_variant/3`, `update_variant/3` takes the caller's scope first and
+  checks `can_manage_product?/2`; `product_id` is never client input (a
+  `%Product{}` is resolved first, then set with `put_change/3`), and refusals
+  are the same non-enumerable `{:error, changeset}` with a `:base` message as
+  product mutations.
+* The public catalog is unchanged: `get_public_product_by_slug/1` now preloads
+  `active_variants` (sorted by `sort_order, id`) for pages that want to render
+  buy options, but public queries still filter published/active/not-due and
+  never expose pricing of hidden variants.
+* **`Cass.Fulfillment` is a boundary, not a subsystem.** It maps a product type
+  to a fulfillment kind via `kind_for/1` (`:digital`, `:smm`, `:ai`,
+  `:manual` for services, defaulting to `:manual` for anything unknown) so
+  future checkout code can branch without touching product internals. There is
+  deliberately **no** fulfillment table, provider, or integration in this
+  milestone.
+
+## Orders and checkout foundation (Milestone 5)
+
+Checkout now exists as a real, transactional boundary in `Cass.Orders`:
+
+* **`Orders.create_order/2` is the only way in.** It takes the caller's
+  `Cass.Accounts.Scope` and a minimal list of requested items — each map
+  exactly `product_variant_id` + `quantity` (atom or string keys, quantities
+  capped at `OrderItem.max_quantity/0`) — and nothing else. The web layer
+  exercises it with `POST /orders` (`OrderController#create`) and the
+  server-rendered `/orders` and `/orders/:id` pages (`OrdersLive`), behind the
+  `:require_authenticated_user` pipe. Paystack capture and fulfillment
+  integrations are **not** part of this milestone.
+* **Everything money is server-derived.** The variant is the single authority
+  on `price_cents`, `currency`, and stock. The client can never provide a
+  price, total, currency, ownership, or a served-from id; line totals
+  (`unit_price_cents * quantity`) and the order total (the sum, stored as
+  `total_cents`) are computed inside the transaction. A client including a
+  `price_cents`/`total_cents`/`user_id`/name field simply has it ignored.
+* **Single-currency orders.** Every line's currency comes from its variant; if
+  the requested lines do not all agree, the whole check-out is refused with
+  the generic "not available" error rather than guessing an order currency.
+* **The checkout transaction** (`Cass.Orders`, `Repo.transact` following the
+  `accounts.ex` `{:ok, _}/{:error, _}` convention): normalize and combine the
+  requested ids → resolve variants (preloading product + category) and verify
+  sale eligibility (`active` variant, product `published` with
+  `:public`/`:unlisted` visibility, category `active`, `published_at` due,
+  priced) → reserve stock → insert the order and its snapshot
+  items. Any refusal rolls everything back, including already-reserved
+  stock.
+* **Stock is reserved with an atomic conditional update**
+  (`UPDATE ... SET stock = stock - qty WHERE id = ? AND active AND stock >= qty`,
+  `nil` stock = unlimited and needs no decrement). The `WHERE stock >= qty`
+  clause plus the row lock make the reservation safe under concurrency, and DB
+  CHECK constraints (`stock >= 0`, `price_cents >= 0`, added on
+  `cass_product_variants` in the orders migration) are the second line of
+  defence so a purchase can never push stock or price negative.
+* **Order items are historical snapshots.** `product_name`, `variant_name`,
+  `sku`, `unit_price_cents`, `currency`, `quantity`, and `metadata` (the
+  variant's string-keyed `config`) are copied at checkout, so renaming,
+  re-pricing, or archiving a product/variant later never rewrites what a
+  customer bought. Both FKs (`order_id`, `product_variant_id`) are
+  `on_delete: :restrict`, so order history cannot be destroyed by deleting a
+  catalog row or an account.
+* **Lifecycle:** `:awaiting_payment` (created by checkout, stock reserved) →
+  `:paid` → `:processing` → `:completed`, with `:cancelled`/`:failed` terminal.
+  The vocabulary lives in `Cass.Orders.Order.statuses/0`, mirrored by a DB
+  CHECK constraint; only the creation state is reachable this milestone — the
+  transitions belong to the Payments milestone.
+* **Authorization is customer-shaped, not vendor-shaped.** Purchasing is *not*
+  catalog management: any `Scope.authenticated?/1` account may buy (a vendor
+  buys as a customer), guests are refused at the context *and* at the route.
+  Reading follows the ownership convention: an account sees its own orders, an
+  admin sees every order, and `get_order/2` returns `nil` for a foreign,
+  malformed, or unknown id (non-enumerable, so ids cannot be probed).
+* **The public storefront gains a minimal buy surface.** `ProductLive` renders
+  a variant + quantity form posting to `/orders` when a published product has
+  active variants and the shopper is signed in, a sign-in prompt for guests,
+  and keeps the "coming soon" box for products with no variants (existing page
+  tests unchanged).
+
 ## Accounts and current scope
 
 * `Cass.Accounts` owns `cass_users`, `cass_users_tokens`, `cass_user_roles`,
@@ -180,7 +283,14 @@ controls, and [docs/data-model.md](data-model.md) for the tables.
   through direct `UserAuth` calls with a bare socket so no route is needed).
 * `test/cass` — context tests backed by a real PostgreSQL database (DataCase).
   Phase 2 adds `accounts/roles_test.exs` (vocabulary, grant/revoke, database
-  constraints, scope resolution).
+  constraints, scope resolution). Phase 4 adds `catalog_variant_test.exs`
+  (variant schema, pricing/config validation, purchasability, per-product name
+  and global SKU uniqueness, scope-first authorization) and
+  `fulfillment_test.exs` (product-type → fulfillment-kind mapping). Milestone 5
+  adds `orders_test.exs` (snapshotting, server-derived totals, eligibility,
+  stock decrement and rollback, tamper resistance, authorized reads, DB
+  constraints) and `orders_concurrency_test.exs` (`async: false`, shared
+  sandbox, `Task`s) to prove concurrent reservations can never oversell.
 * `test/mix/tasks` — operator task tests, added in Phase 2 for
   `cass.accounts.create_admin` (env-var handling, production refusal,
   idempotency, promotion of an existing account).

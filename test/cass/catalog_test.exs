@@ -143,6 +143,50 @@ defmodule Cass.CatalogTest do
     end
   end
 
+  describe "product types" do
+    test "product_types/0 is the closed vocabulary of the marketplace" do
+      assert Catalog.product_types() == [:digital, :smm, :ai, :service]
+    end
+
+    test "every product type is accepted", %{admin_scope: admin_scope} do
+      {:ok, category} = Catalog.create_category(category_attrs())
+
+      for type <- Catalog.product_types() do
+        assert {:ok, product} =
+                 Catalog.create_product(
+                   category,
+                   product_attrs(%{slug: "#{type}-product", product_type: type})
+                 )
+
+        assert product.product_type == type
+      end
+
+      # An admin can also publish each of them: the type does not change the
+      # lifecycle.
+      for type <- Catalog.product_types() do
+        {:ok, product} =
+          Catalog.create_product(
+            category,
+            product_attrs(%{slug: "publish-#{type}", product_type: type})
+          )
+
+        assert {:ok, published} = Catalog.publish_product(admin_scope, product)
+        assert published.status == :published
+      end
+    end
+
+    test "an invalid product type is rejected" do
+      {:ok, category} = Catalog.create_category(category_attrs())
+
+      for bad_type <- [:gift_card, "gift_card", "crypto"] do
+        assert {:error, changeset} =
+                 Catalog.create_product(category, product_attrs(%{product_type: bad_type}))
+
+        assert "is invalid" in errors_on(changeset).product_type
+      end
+    end
+  end
+
   describe "products" do
     defp category_attrs, do: %{name: "Digital Products", slug: "digital-products"}
 
@@ -151,7 +195,7 @@ defmodule Cass.CatalogTest do
         %{
           name: "Sample Product",
           slug: "sample-product",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public
         },
         overrides
@@ -201,7 +245,7 @@ defmodule Cass.CatalogTest do
       assert {:error, changeset} =
                Catalog.create_product(
                  category,
-                 product_attrs(%{slug: "Bad Slug", product_type: :ai_tool})
+                 product_attrs(%{slug: "Bad Slug", product_type: :ai})
                )
 
       assert "must be lowercase letters, numbers, and single hyphens" in errors_on(changeset).slug
@@ -306,7 +350,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(category, %{
           name: "Public Product",
           slug: "public-product",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public
         })
 
@@ -328,7 +372,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(category, %{
           name: "Draft",
           slug: "draft-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public
         })
 
@@ -336,7 +380,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(category, %{
           name: "Archived",
           slug: "archived-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public
         })
 
@@ -347,7 +391,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(category, %{
           name: "Private",
           slug: "private-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :private
         })
 
@@ -365,7 +409,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(category, %{
           name: "Unlisted",
           slug: "unlisted-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :unlisted
         })
 
@@ -383,7 +427,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(category, %{
           name: "Future",
           slug: "future-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public
         })
 
@@ -420,7 +464,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(child, %{
           name: "Nested",
           slug: "nested-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public
         })
 
@@ -443,7 +487,7 @@ defmodule Cass.CatalogTest do
         Catalog.create_product(product.category, %{
           name: "Private",
           slug: "private-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :private
         })
 

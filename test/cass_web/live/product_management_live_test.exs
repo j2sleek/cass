@@ -30,7 +30,7 @@ defmodule CassWeb.ProductManagementLiveTest do
       %{
         "name" => "Seller Widget",
         "slug" => "seller-widget",
-        "product_type" => "digital_product",
+        "product_type" => "digital",
         "visibility" => "unlisted"
       },
       overrides
@@ -47,7 +47,7 @@ defmodule CassWeb.ProductManagementLiveTest do
       %{
         name: "Seller Widget",
         slug: "seller-widget",
-        product_type: :digital_product,
+        product_type: :digital,
         visibility: :unlisted
       },
       overrides

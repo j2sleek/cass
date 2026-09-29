@@ -1,4 +1,4 @@
-# Seeds the dev database with the public storefront foundation: the three root
+# Seeds the dev database with the public storefront foundation: the four root
 # catalog categories and one published public product per category.
 #
 # Every seeded product is **platform-owned** (`owner_id IS NULL`): the seeder is
@@ -22,7 +22,7 @@ defmodule Cass.Seeds.CatalogSeeder do
         %{
           name: "Projects Dashboard Kit",
           slug: "projects-dashboard-kit",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public,
           short_description:
             "A reusable Elixir + Phoenix dashboard starter with roles, audits, and charts.",
@@ -40,7 +40,7 @@ defmodule Cass.Seeds.CatalogSeeder do
         %{
           name: "Content Calendars, Done For You",
           slug: "content-calendars-done-for-you",
-          product_type: :smm_service,
+          product_type: :smm,
           visibility: :public,
           short_description:
             "A 30-day, platform-tailored posting calendar reviewed by a human strategist.",
@@ -58,12 +58,30 @@ defmodule Cass.Seeds.CatalogSeeder do
         %{
           name: "Email Tone Adjuster",
           slug: "email-tone-adjuster",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public,
           short_description:
             "Rewrite any draft email at five tone levels without ever sharing your account.",
           description:
             "A privacy-first tool that rewrites drafts to friendly, formal, confident, concise, or\npersuasive tones. Your messages are processed in-session and never stored."
+        }
+      ]
+    },
+    %{
+      name: "Services",
+      slug: "services",
+      description:
+        "Expert services delivered by real humans: audits, design, development, and management.",
+      products: [
+        %{
+          name: "Manual SEO Audit",
+          slug: "manual-seo-audit",
+          product_type: :service,
+          visibility: :public,
+          short_description:
+            "A human-performed technical and content audit with a prioritized fix list.",
+          description:
+            "An analyst reviews your site's crawling, indexing, on-page signals, and content\ncoverage by hand, then delivers a prioritized action plan you can hand to a developer\nor team."
         }
       ]
     }

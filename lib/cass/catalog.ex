@@ -79,7 +79,7 @@ defmodule Cass.Catalog do
   import Ecto.Query, warn: false
 
   alias Cass.Accounts.Scope
-  alias Cass.Catalog.{Category, Product}
+  alias Cass.Catalog.{Category, Product, ProductVariant}
   alias Cass.Repo
 
   @not_authorized_to_create "you are not authorized to create a product"
@@ -240,6 +240,10 @@ defmodule Cass.Catalog do
     |> where([p], p.slug == ^slug)
     |> where([p], p.visibility in [:public, :unlisted])
     |> Repo.one()
+    |> then(fn
+      nil -> nil
+      product -> Repo.preload(product, active_variants: public_variant_query())
+    end)
   end
 
   @doc """
@@ -393,6 +397,94 @@ defmodule Cass.Catalog do
     end
   end
 
+  ## Product types
+
+  @doc "Returns the closed vocabulary of product types."
+  def product_types, do: Ecto.Enum.values(Product, :product_type)
+
+  ## Product variants
+
+  @doc """
+  Returns every variant of a product for a caller that may manage it, ordered
+  by `sort_order` then id.
+
+  A caller that may not manage the product gets `[]` — the same
+  non-enumerable shape as `list_managed_products/1`. The product row itself is
+  never the input here; callers reach variants through a product they already
+  hold.
+  """
+  def list_product_variants(%Scope{} = scope, %Product{} = product) do
+    if can_manage_product?(scope, product) do
+      list_variants_by_query(variant_query(product, []))
+    else
+      []
+    end
+  end
+
+  @doc """
+  Returns the active variants of a product, ordered by `sort_order` then id.
+
+  This is the **purchasable** read: the future checkout boundary must pick
+  variants from here (or apply `ProductVariant.purchasable?/1` to a row it
+  already holds), so an inactive variant can never be bought. Nothing in this
+  function is gated on authorization because nothing here is secret once the
+  product itself is public.
+  """
+  def list_active_variants(%Product{} = product) do
+    list_variants_by_query(variant_query(product, [:active]))
+  end
+
+  @doc """
+  Creates a variant for `product` on behalf of `scope`.
+
+  Mirrors `create_product/3`'s security shape: the caller must be able to
+  manage the product, `product_id` is written from the resolved `%Product{}`
+  rather than read from `attrs`, and a refusal is a non-enumerable changeset
+  error. Ownership is inherited from the product — a vendor can only add
+  variants to its own products.
+  """
+  def create_variant(%Scope{} = scope, %Product{} = product, attrs) do
+    if can_manage_product?(scope, product) do
+      %ProductVariant{}
+      |> ProductVariant.changeset(attrs)
+      |> Ecto.Changeset.put_change(:product_id, product.id)
+      |> Repo.insert()
+    else
+      not_authorized(%ProductVariant{}, @not_authorized_to_manage)
+    end
+  end
+
+  @doc """
+  Builds (and validates) the changeset for the variant form without inserting,
+  refusing outright when the caller may not manage the product.
+  """
+  def change_variant(%Scope{} = scope, %Product{} = product, attrs) do
+    if can_manage_product?(scope, product) do
+      {:ok,
+       %ProductVariant{}
+       |> ProductVariant.changeset(attrs)
+       |> Ecto.Changeset.put_change(:product_id, product.id)}
+    else
+      not_authorized(%ProductVariant{}, @not_authorized_to_manage)
+    end
+  end
+
+  @doc """
+  Updates a variant, refusing when the caller may not manage the variant's
+  product.
+  """
+  def update_variant(%Scope{} = scope, %ProductVariant{} = variant, attrs) do
+    variant = Repo.preload(variant, :product)
+
+    if can_manage_product?(scope, variant.product) do
+      variant
+      |> ProductVariant.changeset(attrs)
+      |> Repo.update()
+    else
+      not_authorized(variant, @not_authorized_to_manage)
+    end
+  end
+
   ## Authorization
 
   @doc """
@@ -538,7 +630,22 @@ defmodule Cass.Catalog do
     end
   end
 
+  defp variant_query(%Product{} = product, filters) do
+    base =
+      from v in ProductVariant,
+        where: v.product_id == ^product.id,
+        order_by: [asc: v.sort_order, asc: v.id]
+
+    if :active in filters, do: where(base, [v], v.active == true), else: base
+  end
+
+  defp list_variants_by_query(query), do: Repo.all(query)
+
   defp preload_management(%Product{} = product), do: Repo.preload(product, [:category, :owner])
+
+  defp public_variant_query do
+    from v in ProductVariant, where: v.active == true, order_by: [asc: v.sort_order, asc: v.id]
+  end
 
   defp public_product_query(query) do
     now = utc_now()

@@ -6,9 +6,10 @@ defmodule CassWeb.ProductCard do
   use CassWeb, :html
 
   @product_type_labels %{
-    digital_product: "Digital product",
-    smm_service: "Social service",
-    ai_tool: "AI tool"
+    digital: "Digital",
+    smm: "SMM",
+    ai: "AI",
+    service: "Service"
   }
 
   attr :product, :map, required: true

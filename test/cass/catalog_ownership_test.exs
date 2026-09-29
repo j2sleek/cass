@@ -37,7 +37,7 @@ defmodule Cass.Catalog.OwnershipTest do
       %{
         name: "Widget",
         slug: "widget",
-        product_type: :digital_product,
+        product_type: :digital,
         visibility: :unlisted
       },
       overrides
@@ -56,7 +56,7 @@ defmodule Cass.Catalog.OwnershipTest do
       raw = %Product{
         name: "Raw",
         slug: "raw",
-        product_type: :digital_product,
+        product_type: :digital,
         visibility: :public,
         status: :draft,
         category_id: category.id

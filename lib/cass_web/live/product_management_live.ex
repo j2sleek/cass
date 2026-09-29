@@ -32,9 +32,10 @@ defmodule CassWeb.ProductManagementLive do
   alias CassWeb.NotFound
 
   @product_types [
-    {"Digital product", "digital_product"},
-    {"Social marketing service", "smm_service"},
-    {"AI tool", "ai_tool"}
+    {"Digital", "digital"},
+    {"SMM", "smm"},
+    {"AI", "ai"},
+    {"Service", "service"}
   ]
 
   @visibilities [

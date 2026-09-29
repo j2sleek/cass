@@ -9,12 +9,14 @@ defmodule CassWeb.ProductLive do
   """
   use CassWeb, :live_view
 
+  alias Cass.Accounts.Scope
   alias CassWeb.{Metadata, NotFound}
 
   @product_type_labels %{
-    digital_product: "Digital product",
-    smm_service: "Social service",
-    ai_tool: "AI tool"
+    digital: "Digital",
+    smm: "SMM",
+    ai: "AI",
+    service: "Service"
   }
 
   @impl true
@@ -33,6 +35,7 @@ defmodule CassWeb.ProductLive do
         socket
         |> assign(:not_found, false)
         |> assign(:product, product)
+        |> assign(:buy_form, build_buy_form(product.active_variants))
         |> assign(:page_title, "#{Metadata.title(product)} · CASS Marketplace")
         |> assign(:meta_description, Metadata.product_description(product))
         |> assign(:canonical_url, CassWeb.Endpoint.url() <> ~p"/catalog/products/#{product.slug}")
@@ -128,10 +131,75 @@ defmodule CassWeb.ProductLive do
                 </div>
               </dl>
 
-              <div class="mt-6 rounded-xl bg-zinc-50 p-4 text-xs leading-5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
-                Purchase and delivery options for this product are coming soon as the
-                marketplace grows.
-              </div>
+              <%= if @buy_form do %>
+                <%= if Scope.authenticated?(@current_scope) do %>
+                  <div id="buy-panel" class="mt-6">
+                    <h2 class="text-sm font-semibold tracking-tight text-zinc-900 dark:text-white">
+                      Buy {default_variant(@product.active_variants).name}
+                    </h2>
+                    <p class="mt-1 text-sm font-semibold text-brand-700 dark:text-brand-300">
+                      {money(
+                        default_variant(@product.active_variants).price_cents,
+                        default_variant(@product.active_variants).currency
+                      )}
+                      <span class="font-normal text-zinc-500 dark:text-zinc-400">
+                        each · prices and stock verified at checkout
+                      </span>
+                    </p>
+
+                    <.form
+                      for={@buy_form}
+                      id="buy-form"
+                      action={~p"/orders"}
+                      method="post"
+                      class="mt-4"
+                    >
+                      <.input
+                        field={@buy_form[:product_variant_id]}
+                        type="select"
+                        name="product_variant_id"
+                        label="Variant"
+                        options={variant_options(@product.active_variants)}
+                      />
+                      <.input
+                        field={@buy_form[:quantity]}
+                        type="number"
+                        name="quantity"
+                        label="Quantity"
+                        step="1"
+                        min="1"
+                        max={Cass.Orders.OrderItem.max_quantity()}
+                      />
+                      <button
+                        id="buy-button"
+                        type="submit"
+                        class="mt-4 w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+                      >
+                        Buy now
+                      </button>
+                    </.form>
+                  </div>
+                <% else %>
+                  <div
+                    id="buy-sign-in"
+                    class="mt-6 rounded-xl bg-zinc-50 p-4 text-xs leading-5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400"
+                  >
+                    Sign in to buy this product.
+                    <.link
+                      navigate={~p"/users/log-in"}
+                      id="product-log-in-link"
+                      class="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-300"
+                    >
+                      Log in
+                    </.link>
+                  </div>
+                <% end %>
+              <% else %>
+                <div class="mt-6 rounded-xl bg-zinc-50 p-4 text-xs leading-5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
+                  Purchase and delivery options for this product are coming soon as the
+                  marketplace grows.
+                </div>
+              <% end %>
             </div>
           </aside>
         </div>
@@ -147,6 +215,22 @@ defmodule CassWeb.ProductLive do
 
   defp format_date(%DateTime{} = datetime), do: Calendar.strftime(datetime, "%B %d, %Y")
   defp format_date(_), do: "TBA"
+
+  defp build_buy_form([first_variant | _rest]) do
+    to_form(%{"product_variant_id" => first_variant.id, "quantity" => "1"}, as: :buy)
+  end
+
+  defp build_buy_form(_no_variants), do: nil
+
+  defp default_variant([first_variant | _rest]), do: first_variant
+
+  defp variant_options(variants), do: Enum.map(variants, &{&1.name, &1.id})
+
+  defp money(cents, currency) when is_integer(cents) do
+    dollars = div(cents, 100)
+    remainder = rem(cents, 100) |> Integer.to_string() |> String.pad_leading(2, "0")
+    "#{currency} #{dollars}.#{remainder}"
+  end
 
   defp ok(socket), do: {:ok, socket}
 end

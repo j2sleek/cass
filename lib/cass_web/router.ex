@@ -48,8 +48,11 @@ defmodule CassWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{CassWeb.UserAuth, :require_authenticated}] do
       live "/users/settings", UserSettingsLive
+      live "/orders", OrdersLive, :index
+      live "/orders/:id", OrdersLive, :show
     end
 
+    post "/orders", OrderController, :create
     get "/users/settings/confirm-email/:token", UserConfirmationController, :confirm_email
   end
 

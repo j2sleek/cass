@@ -4,15 +4,21 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 3 Phase 3 (product ownership and ownership-safe
-management).** This release ships the server-rendered storefront catalog, a
+**Status: Milestone 5 (transactional checkout with atomic stock
+reservation).** This release ships the server-rendered storefront catalog, a
 complete, session-based account system (registration with emailed confirmation,
 login with an optional 14-day remembered session, password reset, and account
 settings), a minimal role system where every account is a customer and
 `:admin`/`:vendor` are explicit grants read from the database on each request,
-and product ownership: a product either belongs to the platform
+product ownership: a product either belongs to the platform
 (`owner_id IS NULL`) or to one account, with a protected `/manage/products`
-area for sellers and admins. Checkout, payments, transfers, and AI features
+area for sellers and admins, and the product-centric catalog: everything sold
+is a `Product` with a closed product-type vocabulary
+(`digital | smm | ai | service`) and per-variant pricing/stock
+(`cass_product_variants`). A customer can now sign in, pick a variant and
+quantity on a product page, and check out: `Cass.Orders` resolves, prices, and
+reserves stock in one transaction, snapshots each line into `cass_order_items`,
+and `/orders` lists the purchase. Payment capture, transfers, and AI features
 arrive in later milestones and are **not** available yet.
 
 ## Requirements
@@ -140,6 +146,63 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   and JSON-LD are untouched, and no owner information is rendered or exposed
   publicly.
 
+### Product-centric catalog (Milestone 4)
+
+* **Everything sold is a Product** — `Cass.Catalog.Product` now carries the
+  closed product-type vocabulary (`product_types/0` → `:digital`, `:smm`,
+  `:ai`, `:service`), enforced again by a database CHECK constraint, and a
+  `featured` showcase flag. The former `digital_product`/`smm_service`/`ai_tool`
+  values were renamed in a deterministic data migration without losing any
+  existing rows. See [docs/data-model.md](docs/data-model.md).
+* **Product Variants own pricing and stock** — `cass_product_variants`
+  (`price_cents` integer minor units, `currency` default `USD`, nullable
+  `stock` = unlimited, `active`, `sort_order`, type-specific `config` JSONB
+  with string keys only). A variant is `purchasable?` when active and in
+  stock; names are unique per product (case-insensitive) and `sku` globally
+  unique.
+* **Scope-first variant authorization** — `create_variant/3` and
+  `update_variant/3` take the caller's scope first and reuse
+  `can_manage_product?/2`, and `product_id` is never taken from params. See
+  [docs/security.md](docs/security.md).
+* **Fulfillment boundary** — `Cass.Fulfillment.kind_for/1` maps a product type
+  to a fulfillment kind (`digital`/`smm`/`ai`/`manual`), a seam for future
+  checkout code; no fulfillment table or provider integration exists yet.
+* **Public storefront unchanged** — product/category pages, slugs, SEO, and
+  JSON-LD keep working; product pages may now preload `active_variants`.
+
+### Checkout foundation (Milestone 5)
+
+* **`Cass.Orders` is the checkout boundary** — `create_order/2` takes the
+  caller's scope and minimal `product_variant_id` + `quantity` lines, and does
+  everything in one `Repo.transact` (the `accounts.ex` `{:ok, _}/{:error, _}`
+  convention): resolve variants, verify sale eligibility, **atomically reserve
+  stock**, insert the order and its snapshot items. Any refusal rolls
+  everything back. See [docs/data-model.md](docs/data-model.md).
+* **Money is server-derived** — the variant row is the only authority on price
+  and currency. Line totals (`unit_price_cents * quantity`) and the order
+  `total_cents` (the server sum, stored) are computed in the transaction; a
+  request carrying its own price/total/currency/ownership is ignored
+  field-by-field. Orders are single-currency, refused wholesale otherwise.
+* **Stock cannot oversell** — reservation is one conditional statement
+  (`UPDATE ... SET stock = stock - qty WHERE id = ? AND active AND stock IS
+  NOT NULL AND stock >= qty`, `nil` = unlimited), so concurrent buyers
+  claiming the last units serialize on the row lock
+  (`test/cass/orders_concurrency_test.exs` proves exactly N sold, stock
+  never negative). DB CHECK constraints (`stock/price_cents >= 0`) back it up.
+* **Order items are historical snapshots** — product/variant name, SKU, unit
+  price, currency, quantity, and `metadata` (the variant `config`) are copied
+  at checkout and never re-derived; both FKs are `on_delete: :restrict` so
+  catalog edits or account deletion can't rewrite or destroy a receipt.
+* **Lifecycle vocabulary** — `awaiting_payment` (created, stock reserved) →
+  `paid` → `processing` → `completed`, terminal `cancelled`/`failed`, mirrored
+  by a CHECK constraint; only creation is reachable until the Payments
+  milestone.
+* **Minimal web surface** — signed-in shoppers get a variant + quantity buy
+  form on product pages (`POST /orders`), guest shoppers a sign-in prompt;
+  `/orders` and `/orders/:id` show a customer's own orders (admin sees all;
+  anything else renders not-found). No payment capture, no vendor side of
+  orders, no fulfillment beyond the `Cass.Fulfillment` seam.
+
 ### Catalog (Milestone 2)
 
 * **Catalog domain** — `categories` and `products` tables (migrations in
@@ -155,8 +218,9 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   names, immutable published/archived slugs, archived-entity immutability,
   publish gating (`:draft` + active category), and visibility
   (`public`/`unlisted`/`private`) with `published_at` scheduling.
-* **Seeds** — `mix run priv/repo/seeds.exs` loads three root categories with
-  a published product each (idempotent).
+* **Seeds** — `mix run priv/repo/seeds.exs` loads four root categories with
+  a published product each (idempotent), including a `:service` "Manual SEO
+  Audit" product.
 * **Health endpoint** — `GET /api/v1/health` reports service, version,
   environment, database status, uptime, and a timestamp. See
   [API contract](docs/api-contract.md).
@@ -182,12 +246,15 @@ See [docs/architecture.md](docs/architecture.md) for details.
 3. ~~Accounts and authentication~~
 4. ~~Roles and authorization foundation (`:admin`/`:vendor`, guards)~~
 5. ~~Product ownership and ownership-safe management~~
-6. Vendor onboarding, admin dashboard, profile, and account deletion
+6. ~~Product-centric catalog (product types + variants; `:service` type)~~
+7. Vendor onboarding, admin dashboard, profile, and account deletion
    (ownership *transfer* is deliberately deferred: deleting an account that
    still owns products is refused by the database)
-7. Checkout and order flow
-8. AI tools routed through the Nexus AI Gateway
-9. JSON catalog API under `/api/v1` (optional, additive)
+8. ~~Checkout and order flow (order items consume variant pricing/stock)~~
+9. Payments and fulfillment (capture `awaiting_payment` orders, drive the
+   lifecycle, hand off to `Cass.Fulfillment.kind_for/1`)
+10. AI tools routed through the Nexus AI Gateway
+11. JSON catalog API under `/api/v1` (optional, additive)
 
 Payments, physical product fulfillment, and live AI integrations are scoped to
 later milestones.

@@ -1,10 +1,15 @@
 # Security
 
-Current status: **Milestone 3 Phase 2 — accounts, authentication, and the
-`:admin`/`:vendor` role foundation are implemented** (see
-[Accounts security](#accounts-and-authentication-milestone-3-phase-1) and
-[Roles and authorization](#roles-and-authorization-milestone-3-phase-2)).
-Catalog controls (below) still apply unchanged.
+Current status: **Milestone 5 — accounts, authentication, the
+`:admin`/`:vendor` role foundation, product ownership, the product-centric
+catalog (product types + variants), and transactional checkout with atomic
+stock reservation are implemented** (see
+[Accounts security](#accounts-and-authentication-milestone-3-phase-1),
+[Roles and authorization](#roles-and-authorization-milestone-3-phase-2),
+[Product ownership](#product-ownership-milestone-3-phase-3),
+[Variants reuse the product check](#variants-reuse-the-product-check-milestone-4),
+and [Orders and checkout](#orders-and-checkout-milestone-5)).
+Catalog and checkout controls below apply unchanged.
 
 ## Threat model and boundaries
 
@@ -364,6 +369,31 @@ skipped by reaching the context directly.
   socket's `current_scope`, so a tampered `product_id` in an event payload
   resolves to nothing — the same treatment as a guessed URL.
 
+### Variants reuse the product check (Milestone 4)
+
+Product variants are the pricing/stock surface of the products above, and they
+inherit its threat model:
+
+* `create_variant/3` and `update_variant/3` take the caller's scope **first**
+  and call `can_manage_product?/2` before any write, mirroring
+  `update_product/3`. A seller editing variants of another seller's (or the
+  platform's) product gets the same non-enumerable `{:error, changeset}` with a
+  `:base` message as every other refusal.
+* `product_id` is **never an input**. Callers resolve a `%Product{}` (via the
+  same owner-scoped reads) and the context writes `product_id` with
+  `put_change/3`; a `product_id` inside the attribute map is ignored because it
+  is absent from the variant changeset's cast list.
+* `sku` and the partial `[product_id, lower(name)]` uniqueness are enforced at
+  the database level (unique constraints), so even a direct write cannot create
+  two SKUs or two same-named variants of one product.
+* The public path is untouched: `get_public_product_by_slug/1` preloads only
+  `active_variants` for product pages, and the storefront never exposes the
+  variants of a non-published/future/private product (covered by
+  `test/cass/catalog_variant_test.exs`).
+* Product types are a closed vocabulary mirrored by a CHECK constraint; a type
+  string that does not map to an existing atom is rejected (no atom interning
+  from input), so a hostile `product_type` cannot widen the vocabulary.
+
 ### Deleting an account is a database decision
 
 `on_delete: :restrict` means the database refuses to delete a user who still
@@ -372,6 +402,80 @@ is currently a guard rail; when account deletion lands it must transfer or
 archive first. This is why ownership **transfer** is deferred rather than
 skipped: it is the operation that would have to be designed and authorized
 before deletion could be offered.
+
+## Orders and checkout (Milestone 5)
+
+Checkout introduces the first write path regular customers can reach, so it
+gets its own threat model:
+
+### The threat
+
+An attacker driving `POST /orders` (or calling `Cass.Orders` directly) could
+try to underpay, steal stock, or probe the catalog: sending their own
+`price_cents`/`total_cents`, a negative or zero total, an out-of-stock
+quantity, a foreign `user_id`, a disabled/unpriced variant, or malformed item
+shapes.
+
+### Money is server-derived, never client input
+
+* The changeset casts **only** `number`, `status`, `total_cents`, `currency`;
+  `user_id` (and the order's items) are written with `put_change/3` from data
+  the server resolved. Attributes map keys like `price_cents`, `total_cents`,
+  `currency`, `user_id`, `product_name`, `variant_name` are simply absent from
+  the cast lists, so a tampered request is ignored field-by-field rather than
+  refused (so probing is not rewarded with detail).
+* Every line total is `unit_price_cents * quantity` where both come from the
+  variant row and a validated quantity (1..`max_quantity`); `total_cents` is
+  the server sum. A line is never priced from the request.
+* Money is integer minor units with DB CHECK constraints `>= 0`, so no
+  computation can go negative.
+
+### Stock is reserved atomically, and cannot oversell
+
+* The reservation is one statement:
+  `UPDATE cass_product_variants SET stock = stock - qty WHERE id = ? AND active AND stock IS NOT NULL AND stock >= qty`.
+  A concurrent buyer whose `WHERE stock >= qty` is now false gets zero rows and
+  a refusal. Because each statement takes a row lock on the variant, and the
+  whole checkout is one transaction, the invariant `stock >= 0` holds even
+  under overlapping requests (`test/cass/orders_concurrency_test.exs`).
+* Unlimited variants (`stock IS NULL`) are not written at all.
+* Eligible-but-refused purchases roll back all lines, so a 5-line order that
+  fails on line 4 takes no stock and produces no order.
+
+### Eligibility errors are not enumerable
+
+A variant that is `inactive`, un-priced, out of stock, or whose product is
+not `published`, is `:private`, or is in a non-`:active`/not-due category all
+resolve to the same generic "an item in the order is not available for
+purchase" `:base` error — and malformed input to a separate "the order request
+is invalid". A direct caller learns nothing about *cause* or *which* item.
+
+### Order records are tamper-proof and capability-based to read
+
+* `cass_orders` never exposes a client-controlled field that changes money,
+  and only `Cass.Orders` can write it.
+* `list_orders/1` is owner-or-admin, scoped in SQL; `get_order/2` returns
+  `nil` for foreign/unknown/malformed ids — a stranger's order number cannot be
+  guessed or probed (`/orders/:id` shows the same not-found state).
+* `OrdersLive` sits behind the `:require_authenticated_user` live_session with
+  `current_scope` passed through, and redirects guests to log in. `POST /orders`
+  is guarded the same way at the controller.
+* Order items snapshotted at checkout (`on_delete: :restrict` on both FKs)
+  mean later re-pricing, renaming, archiving, or (eventually) deleting a
+  product/variant cannot rewrite or strand a receipt.
+
+### Deliberate limitations (Milestone 5)
+
+* **No payment capture.** `:awaiting_payment` is the only reachable status;
+  money is never actually collected, so there is no payment-card/PCI surface to
+  review yet. Cancellation/refund/reversal paths do not exist yet.
+* **No vendor side of orders.** Sellers cannot yet see "orders for my
+  products", payouts resolve nothing, and fulfillment is still the
+  `Cass.Fulfillment` mapping seam only.
+* **Stock is not transactional inventory accounting.** The context exposes no
+  "restock"/"adjust" API and no audit of the decrement (the `stock` change is
+  the snapshot), consistent with "no audit trail" elsewhere in this milestone
+  group.
 
 ### Deliberate limitations (Milestone 3 Phase 3)
 
@@ -386,7 +490,9 @@ before deletion could be offered.
   want an explicit `suspended_at`.
 * **The management area is minimal by design** — list, create, edit, publish,
   archive. No pricing, orders, payouts, or onboarding, so there is no second
-  authorization surface to review yet.
+  authorization surface to review yet. (Variants exist at the *context* level
+  with full scope-first authorization but have no management UI yet, so there
+  is still no additional web surface to review.)
 * **No audit trail** for publish/archive/ownership changes, consistent with
   Phase 2's role limitation.
 

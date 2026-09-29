@@ -26,7 +26,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Sample Product",
           slug: "sample-product",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public,
           short_description: "A short blurb.",
           description: "A longer product description."
@@ -83,7 +83,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Sample Product",
           slug: "sample-product",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public,
           short_description: "A short blurb."
         })
@@ -132,7 +132,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Sample Product",
           slug: "sample-product",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public,
           short_description: "A short blurb.",
           description: "A longer product description."
@@ -169,7 +169,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Draft Item",
           slug: "draft-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public
         })
 
@@ -177,7 +177,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Private Item",
           slug: "private-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :private
         })
 
@@ -187,7 +187,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Archived Item",
           slug: "archived-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :public
         })
 
@@ -213,7 +213,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Doomed",
           slug: "doomed-product",
-          product_type: :digital_product,
+          product_type: :digital,
           visibility: :public
         })
 
@@ -232,7 +232,7 @@ defmodule CassWeb.CatalogPagesTest do
         Catalog.create_product(category, %{
           name: "Unlisted Item",
           slug: "unlisted-item",
-          product_type: :ai_tool,
+          product_type: :ai,
           visibility: :unlisted
         })
 

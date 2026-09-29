@@ -1,10 +1,15 @@
 # Data Model
 
-Current status: **Milestone 3 Phase 2 — the role foundation is implemented.**
-Five domain tables exist: the two catalog tables below plus `cass_users`,
-`cass_users_tokens`, and `cass_user_roles`, all owned by the `Cass.Accounts`
-context. Orders, entitlements, and AI tool runtime data arrive in later
-milestones.
+Current status: **Milestone 5 — checkout exists on the product-centric
+catalog.** Everything sold on CASS is a `Product`, priced and stocked at the
+**product variant** level, with a closed product-type vocabulary
+(`digital | smm | ai | service`). Orders now snapshot what was bought (names,
+SKU, price, currency, quantity, config) and reserve stock atomically. Eight
+domain tables exist: the three catalog tables below, `cass_orders` and
+`cass_order_items` (this milestone), plus `cass_users`, `cass_users_tokens`,
+and `cass_user_roles`, all owned by the `Cass.Catalog`, `Cass.Orders`, and
+`Cass.Accounts` contexts. Payments, entitlements, and AI tool runtime data
+arrive in later milestones.
 
 ## Naming and conventions
 
@@ -48,9 +53,10 @@ duplicate sibling names regardless of case.
 | `category_id` | bigint      | FK `cass_categories` (`on_delete: :restrict`), required |
 | `slug`        | string      | Unique, lowercase `[a-z0-9]+(?:-[a-z0-9]+)*`, **immutable once published or archived** |
 | `name`        | string      | Required, not unique                      |
-| `product_type`| enum        | `digital_product` \| `smm_service` \| `ai_tool` |
+| `product_type`| enum        | `digital` \| `smm` \| `ai` \| `service`   |
 | `status`      | enum        | `draft` \| `published` \| `archived`      |
 | `visibility`  | enum        | `public` \| `unlisted` \| `private`       |
+| `featured`    | boolean     | Default `false`; showcase flag only, does not affect queries |
 | `short_description` | string | Optional, used on cards / previews |
 | `description` | text        | Optional, plain text                      |
 | `seo_title`   | string      | Optional                                  |
@@ -64,6 +70,86 @@ Index: unique `slug`, plus a plain (non-unique) `owner_id` index for the
 seller's "my products" query. CHECK constraints enforce the enum domains
 (`product_type`, `status`, `visibility`); the publish-only-drafts and
 publish-into-active-category guards live in the `Cass.Catalog` context layer.
+
+### `cass_product_variants` (Milestone 4)
+
+Everything that checkout will need is priced and stocked on a **variant**, not
+on the product:
+
+| Column        | Type        | Notes                                     |
+| ------------- | ----------- | ----------------------------------------- |
+| `id`          | bigint      | PK                                        |
+| `product_id`  | bigint      | FK `cass_products` (`on_delete: :restrict`), required |
+| `name`        | string      | Required, e.g. "1,000", "Pro tier"        |
+| `sku`         | string      | Optional, **globally unique**, immutable once set |
+| `price_cents` | integer     | Optional, integer minor units (no floats); `null` until priced |
+| `currency`    | string      | Default `"USD"` (ISO 4217, uppercase)     |
+| `stock`       | integer     | Optional; `null` = unlimited, `0` = out of stock |
+| `active`      | boolean     | Default `true`; one of the purchasability gates |
+| `sort_order`  | integer     | Display/choice order, ascending           |
+| `config`      | jsonb       | Type-specific purchasable config, **string keys only** |
+| `inserted_at` / `updated_at` | utc_datetime | |
+
+Indexes: `product_id` (non-unique); partial `active`; unique
+`[product_id, lower(name)]` (`cass_product_variants_product_name_index`) so no
+two variants of one product share a name case-insensitively; unique partial
+`sku WHERE sku IS NOT NULL` (`cass_product_variants_sku_index`). A product
+belongs to a variant pivot table none other: `cass_product_variants` is the
+only row source for pricing/stock, so a product with no active variants
+effectively cannot be purchased yet.
+
+Milestone 5 adds two CHECK constraints to this table as the database's second
+line of defence for checkout: `stock is null or stock >= 0` and
+`price_cents is null or price_cents >= 0`. The application enforces these in
+the variant changeset already; the constraints guarantee a successful purchase
+can never strand a negative stock or price, even against a direct write.
+
+### `cass_orders` (Milestone 5)
+
+An order is the immutable record of a purchase. Its `total_cents` is the
+server-summed line total — never a client value.
+
+| Column      | Type       | Notes                                        |
+| ----------- | ---------- | -------------------------------------------- |
+| `id`        | bigint     | PK                                           |
+| `number`    | string     | Unique, server-generated `C-` + 10 base32 uppercase chars |
+| `user_id`   | bigint     | FK `cass_users` (`on_delete: :restrict`), required; owner of the order |
+| `status`    | string     | CHECK: one of `awaiting_payment`, `paid`, `processing`, `completed`, `cancelled`, `failed`; default `awaiting_payment` |
+| `total_cents` | integer  | CHECK `>= 0`; integer minor units, server-derived |
+| `currency`  | string     | Default `"USD"` (ISO 4217); must match every line |
+| `inserted_at` / `updated_at` | utc_datetime | |
+
+Indexes: unique `number`; `user_id`; `status`. The CHECK on `status` mirrors
+`Cass.Orders.Order.statuses/0`, the same vocabulary-plus-constraint pattern
+used for product types and roles. Foreign keys are `on_delete: :restrict`: an
+account that has ordered cannot be deleted out from under its history.
+
+### `cass_order_items` (Milestone 5)
+
+A purchased line, and a **historical snapshot** of the commercial facts at
+checkout time.
+
+| Column              | Type       | Notes                                        |
+| ------------------- | ---------- | -------------------------------------------- |
+| `id`                | bigint     | PK                                           |
+| `order_id`          | bigint     | FK `cass_orders` (`on_delete: :restrict`), required |
+| `product_variant_id`| bigint     | FK `cass_product_variants` (`on_delete: :restrict`), required |
+| `product_name`      | string     | Snapshot, required (max 120)                 |
+| `variant_name`      | string     | Snapshot, required (max 120)                 |
+| `sku`               | string     | Snapshot, optional (max 60)                  |
+| `unit_price_cents`  | integer    | Snapshot, required, CHECK `>= 0`; integer minor units |
+| `currency`          | string     | Default `"USD"`, required                    |
+| `quantity`          | integer    | Required, CHECK `> 0`, capped at `OrderItem.max_quantity/0` (100_000) |
+| `metadata`          | jsonb      | Snapshot of the variant's `config` (string keys only), default `{}` |
+| `inserted_at` / `updated_at` | utc_datetime | |
+
+Indexes: `order_id`; `product_variant_id`. Line totals are never stored —
+`unit_price_cents * quantity` is derived by `OrderItem.line_total_cents/1`,
+and the order's `total_cents` is the sum (`Orders.order_total_cents/1`). Both
+FKs are `on_delete: :restrict`, so re-pricing, renaming, or archiving a
+product/variant later can never rewrite what a customer bought.
+
+### `cass_categories`
 
 #### `owner_id` (Milestone 3 Phase 3)
 
@@ -213,6 +299,54 @@ contexts use.
   * `private` — never returned by public queries (treated as not-found).
 * `published_at <= now` gates public queries (scheduled/future publishes are
   hidden until due).
+* **Product types (Milestone 4)** — `product_types/0` is the closed vocabulary
+  (`[:digital, :smm, :ai, :service]`), mirrored by
+  `cass_products_product_type_check`. Adding or renaming a type is therefore a
+  migration, not just a code change. The 2026-09-28 migration renamed the old
+  values deterministically (`digital_product→digital`, `smm_service→smm`,
+  `ai_tool→ai`) and added `:service`; web labels/options derive from
+  `Cass.Catalog.product_types/0`.
+* **Variants (Milestone 4)** — a variant is `purchasable?` when `active` and
+  `stock` is not `0`. `price_cents` and `stock` are validated `>= 0`
+  (`validate_number`, non-nil changes only); `config` must be a map with
+  string keys or the changeset rejects it. Variant mutations are scope-first
+  and reuse the product ownership check (`can_manage_product?/2`), never
+  accepting a `product_id` from params.
+
+### Orders (Milestone 5)
+
+* **Checkout input is minimal** — each requested line is exactly
+  `product_variant_id` + `quantity` (positive integers or numeric strings,
+  quantity capped at `OrderItem.max_quantity/0`). Repeated ids are combined.
+  Malformed requests are one generic error: "the order request is invalid".
+* **The variant row is the only authority** on `price_cents`, `currency`, and
+  stock; the product must be `published` (its `published_at` due) with
+  `:public`/`:unlisted` visibility and in an `active` category, and the
+  variant `active` and priced. Any failure surfaces as the same generic "not
+  available" error, so a direct caller cannot learn *why* an item was refused.
+* **The order must be single-currency** — every line's currency comes from its
+  variant; mixed-currency requests are refused wholesale rather than guessed.
+* **Totals are always the server-derived sum.** `total_cents` on the order and
+  `OrderItem.line_total_cents/1` (`unit_price_cents * quantity`) are what an
+  order's stored total must equal (`Orders.order_total_cents/1`). A request
+  that carries its own `price_cents`, `total_cents`, `currency`, `user_id`, or
+  names has those fields ignored.
+* **Stock reservation is atomic**: `UPDATE ... SET stock = stock - qty
+  WHERE id = ? AND active AND stock IS NOT NULL AND stock >= qty`. One affected
+  row = reserved; zero = out of stock (order refused, nothing written).
+  `stock IS NULL` (unlimited) needs no decrement. The whole check-out is one
+  `Repo.transact` (the `accounts.ex` `{:ok, _}/{:error, _}` convention), so a
+  failure on any line rolls back the order, its items, and every reservation.
+* **Order items are immutable snapshots.** Neither schema exposes an update
+  path in this milestone, and `on_delete: :restrict` keeps history around even
+  if a catalog row or account is deleted.
+* **Order status** starts `awaiting_payment` and is the only reachable state
+  here; later milestones drive `paid → processing → completed` and the terminal
+  `cancelled`/`failed`.
+* **Reading is owner-or-admin.** `list_orders/1` returns every order for an
+  admin and the caller's own otherwise (none for guests); `get_order/2` is
+  `nil` for a foreign, malformed, or unknown id — a missing order and somebody
+  else's order are deliberately indistinguishable.
 
 ### Accounts
 
@@ -256,10 +390,11 @@ contexts use.
 
 ## Planned schema (roadmap)
 
-* `orders`, `order_items` — checkout and fulfillment state machine.
+* ~~`orders`, `order_items` — checkout and fulfillment state machine.~~
+  Implemented in Milestone 5 (snapshot items, atomic stock reservation,
+  lifecycle vocabulary); payment capture and fulfillment *transitions* arrive
+  with the Payments milestone.
 * `downloads` / `entitlements` — digital product access grants.
-* `prices` as integer minor units (`price_cents`, plain `integer`, no
-  floats), currency defaulting to `USD`.
 * Vendor onboarding (the `vendor` profile/business columns). Roles already exist
   (`cass_user_roles`) and product ownership exists (`cass_products.owner_id`), so
   onboarding has to add neither a role system nor an ownership column.
@@ -273,7 +408,22 @@ contexts use.
 
 ## Design decisions
 
-* **Money** (later) is stored as integer minor units to avoid rounding bugs.
+* **Money** is stored as integer minor units (`price_cents`, `total_cents`,
+  plain `integer`, no floats), defaulting to `USD`; pricing lives on
+  `cass_product_variants` so `cass_order_items` can snapshot a variant's price
+  at check-out, and the order total is *always* the server-derived sum of line
+  totals (`unit_price_cents * quantity`).
+* **Orders refuse destructive deletes.** Both order/item FKs are
+  `on_delete: :restrict`, matching the catalog/sellers rule: deleting an
+  account that has ordered, or a variant that has been purchased, is refused by
+  the database rather than silently losing history.
+* **The `:base` refusal is the only error a caller sees.** Just as with
+  catalog authorization, checkout reports "the order request is invalid", "an
+  item … not available", or "out of stock" without distinguishing *which* item
+  or *why*, so a direct POST cannot probe the catalog through the orders API.
+* **Snapshot-only order items.** Names, SKU, price, currency, quantity, and
+  `metadata` (the variant's `config`) are copied at checkout and never
+  re-derived, so catalog edits cannot silently rewrite a receipt.
 * **Soft deletion** is avoided in favor of `status`/`archived_at` so history
   stays intact; archived rows remain queryable by the context.
 * **Timestamps** use `:utc_datetime` per project convention (with the

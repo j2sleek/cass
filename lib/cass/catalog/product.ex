@@ -2,8 +2,12 @@ defmodule Cass.Catalog.Product do
   @moduledoc """
   An item offered in the marketplace catalog.
 
-  A product always belongs to a category and represents one of three product
-  types: `digital_product`, `smm_service`, or `ai_tool`.
+  Everything sold on CASS is a Product. A product always belongs to a category
+  and represents one of four product types: `digital`, `smm`, `ai`, or
+  `service`. The type does not change the fundamental shape of a product; it
+  selects validation, presentation, purchasing configuration (through
+  `Cass.Catalog.ProductVariant`), and fulfillment behavior
+  (`Cass.Fulfillment`).
 
   Lifecycle (`status`):
 
@@ -27,7 +31,7 @@ defmodule Cass.Catalog.Product do
     * `owner_id == <user id>` — the product belongs to that account, which may
       manage it along with admins.
 
-  Ownership is independent of `product_type`: any of the three product types
+  Ownership is independent of `product_type`: any of the four product types
   may be platform-owned or owned by a user. It is also independent of
   `Cass.Accounts` roles: `:vendor` and `:admin` grant the *capability* to own
   and manage, while `owner_id` records *whose* product it is. A plain customer
@@ -38,14 +42,15 @@ defmodule Cass.Catalog.Product do
   import Ecto.Changeset
 
   alias Cass.Accounts.User
-  alias Cass.Catalog.Category
+  alias Cass.Catalog.{Category, ProductVariant}
 
   schema "cass_products" do
     field :name, :string
     field :slug, :string
-    field :product_type, Ecto.Enum, values: [:digital_product, :smm_service, :ai_tool]
+    field :product_type, Ecto.Enum, values: [:digital, :smm, :ai, :service]
     field :status, Ecto.Enum, values: [:draft, :published, :archived], default: :draft
     field :visibility, Ecto.Enum, values: [:public, :unlisted, :private], default: :private
+    field :featured, :boolean, default: false
     field :short_description, :string
     field :description, :string
     field :seo_title, :string
@@ -62,6 +67,9 @@ defmodule Cass.Catalog.Product do
     # part of the cast list, so no request can name the account a product
     # belongs to.
     belongs_to :owner, User
+
+    has_many :variants, ProductVariant, foreign_key: :product_id
+    has_many :active_variants, ProductVariant, foreign_key: :product_id
 
     timestamps(type: :utc_datetime)
   end
@@ -90,6 +98,7 @@ defmodule Cass.Catalog.Product do
       :slug,
       :product_type,
       :visibility,
+      :featured,
       :short_description,
       :description,
       :seo_title,
