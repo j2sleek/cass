@@ -139,6 +139,38 @@ defmodule Cass.Orders do
     Enum.reduce(order_items, 0, fn item, acc -> acc + OrderItem.line_total_cents(item) end)
   end
 
+  @doc """
+  Marks an order as `:paid`.
+
+  This is the *one* exit from `:awaiting_payment`, and it is owned by the
+  Payments boundary: `Cass.Payments` calls it only after a verified provider
+  capture and commits it in the same transaction as the payment becoming
+  `:succeeded`. Provider adapters and client code never call it directly.
+
+  It is idempotent for an already-`:paid` order (a repeated webhook is
+  harmless) and refuses every other state.
+  """
+  def mark_order_paid(order_id) when is_integer(order_id) do
+    case Repo.get(Order, order_id) do
+      nil -> {:error, :order_not_found}
+      order -> mark_order_paid(order)
+    end
+  end
+
+  def mark_order_paid(%Order{status: :awaiting_payment} = order) do
+    order
+    |> Order.changeset(%{status: :paid})
+    |> Repo.update()
+  end
+
+  def mark_order_paid(%Order{status: :paid} = order), do: {:ok, order}
+
+  def mark_order_paid(%Order{} = order) do
+    refusal(order, "the order cannot be paid from its current status")
+  end
+
+  def mark_order_paid(_order_id), do: {:error, :order_not_found}
+
   ## Checkout internals
 
   # Combines duplicated variant ids and validates the shape of every requested

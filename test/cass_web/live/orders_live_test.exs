@@ -108,6 +108,47 @@ defmodule CassWeb.OrdersLiveTest do
     end
   end
 
+  describe "pay surface" do
+    test "the awaiting-payment owner sees the pay form posting to the pay route",
+         %{variant: variant} do
+      %{conn: conn, user: user} = register_and_log_in_user(%{conn: build_conn()})
+      order = place_order(variant, user)
+
+      {:ok, view, _html} = live(conn, "/orders/#{order.id}")
+
+      assert has_element?(view, "#pay-form")
+      assert has_element?(view, "#pay-button", "Pay via Paystack · USD 19.80")
+
+      assert has_element?(
+               view,
+               "form#pay-form[action='/orders/#{order.id}/pay'][method='post']"
+             )
+    end
+
+    test "a stranger viewing the order gets no pay form", %{variant: variant} do
+      order = place_order(variant, user_fixture())
+      %{conn: conn} = register_and_log_in_user(%{conn: build_conn()})
+
+      {:ok, view, _html} = live(conn, "/orders/#{order.id}")
+
+      refute has_element?(view, "#pay-form")
+      refute has_element?(view, "#pay-button")
+    end
+
+    test "an already-paid order hides the pay form even from its owner", %{variant: variant} do
+      %{conn: conn, user: user} = register_and_log_in_user(%{conn: build_conn()})
+      order = place_order(variant, user)
+
+      {:ok, %Cass.Orders.Order{}} = Orders.mark_order_paid(order.id)
+
+      {:ok, view, _html} = live(conn, "/orders/#{order.id}")
+
+      refute has_element?(view, "#pay-form")
+      refute has_element?(view, "#pay-button")
+      assert has_element?(view, "span", "paid")
+    end
+  end
+
   describe "public product purchase surface" do
     test "a signed-in shopper gets the buy form for an active variant",
          %{variant: variant} do

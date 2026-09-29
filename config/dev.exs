@@ -55,6 +55,11 @@ config :cass, CassWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :cass, dev_routes: true
 
+# A dummy Paystack key for development so the adapter can build requests; real
+# payments are exercised against Paystack sandbox with `PAYSTACK_SECRET_KEY`
+# passed through `config/runtime.exs`.
+config :cass, :paystack, secret_key: "sk_test_dev_dummy_dummy_dummy_dummy_dummy"
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

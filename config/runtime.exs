@@ -40,6 +40,11 @@ if config_env() == :dev do
 end
 
 if config_env() == :prod do
+  # The Paystack secret used to authorize API calls and verify webhook
+  # signatures. Optional at boot: if it is unset, the Paystack adapter raises a
+  # clear error the first time a payment is actually attempted.
+  config :cass, :paystack, secret_key: System.get_env("PAYSTACK_SECRET_KEY")
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """

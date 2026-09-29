@@ -177,6 +177,68 @@ Checkout now exists as a real, transactional boundary in `Cass.Orders`:
   and keeps the "coming soon" box for products with no variants (existing page
   tests unchanged).
 
+## Payments and capture (Milestone 6)
+
+The `awaiting_payment → paid` transition now exists, driven by provider
+agnostic payments in `Cass.Payments` with Paystack as the first adapter:
+
+* **`Cass.Payments` is the payments boundary.** The only stable vocabulary is
+  `cass_payments` rows + statuses (`pending`, `processing`, `succeeded`,
+  `failed`, `cancelled`, `expired`, `refunded` — an Ecto enum mirrored by a DB
+  CHECK, this milestone reaching all but the reserved `expired`/`refunded`).
+  A payment **snapshots the order's money** (`amount_cents`, `currency` from
+  `order.total_cents`/`order.currency` at init time) and names its `provider`,
+  `provider_reference`, checkout URL, and `metadata`; a partial unique index
+  `(provider, provider_reference) WHERE provider_reference IS NOT NULL` makes
+  reference collisions impossible.
+* **Adapters are thin and stateless.** `Cass.Payments.Provider` is a behaviour
+  (`name`, `initialize_payment`, `verify_payment`, `parse_webhook`,
+  `capabilities`) consumed by `Cass.Payments.Providers` — a config-driven
+  registry reading `config :cass, Cass.Payments, providers:` where the disabled
+  resolver refuses `{:error, :unknown_provider}`. Provider I/O results are two
+  real structs, `Payment.Provider.InitResult` and `CaptureResult`. The Paystack
+  adapter is an HTTP client (`Req`, bearer-auth secret from
+  `config :cass, :paystack`) that never knows about orders, users, or the DB.
+* **Money stays server-derived end to end.** Initialization takes a `Scope`
+  and an order id, looks the order up via `Orders.get_order/2` (foreign or
+  unknown → the same `{:error, :not_found}`), and only proceeds while the order
+  is `:awaiting_payment`. Refusals are non-enumerable: the controller never
+  learns whether an id exists, is foreign, or is in the wrong lifecycle state.
+* **Idempotent initialization.** CASS generates the `provider_reference`
+  (e.g. `"PY-" <> Base.encode32(...)`) and reuses an in-flight `pending`/
+  `processing` attempt for the order — a double click returns the *same*
+  checkout URL and never recontacts the provider (proved in tests with
+  `Req.Test.expect/3`). A provider failure records the attempt `:failed` with
+  its `failure_reason`, leaves the order `awaiting_payment`, and refuses with a
+  generic "payments are temporarily unavailable" changeset; a later retry then
+  creates a fresh attempt.
+* **Webhooks reconcile by signature, never by session.** `POST /webhooks/
+  paystack` sits outside `:browser`; `Plug.Plug.raw_body_reader` (wired into
+  the endpoint's `Plug.Parsers`) hands `PaymentsWebhookController` the exact JSON
+  bytes, and the adapter HMAC-SHA512-verifies the `x-paystack-signature`
+  against the raw body. Unauthorized bytes get a terse `400`; a correctly
+  signed but unknown reference a `404`; every success is acknowledged `200`
+  without detail. Webhook authorization is *only* the provider signature.
+* **Success pays the payment and the order in one transaction.** The adapter
+  normalizes capture data into a `CaptureResult`; the context reconciles it
+  against the row by `provider + provider_reference`, cross-checks the
+  captured `amount_cents`/`currency` against the snapshot (a mismatch refuses
+  — nothing is ever paid from a different amount), then `Repo.transact`s the
+  payment to `:succeeded (+ paid_at) together with `Orders.mark_order_paid/1`
+  (`:awaiting_payment → :paid`, idempotent). A duplicate success webhook is a
+  committed no-op (already `:succeeded`/`:paid`), so a payment can never
+  double-pay, and no transaction ever holds the DB open across a network call
+  to the provider.
+* **Reported failure only deflates the payment.** A signed `failed`/`abandoned`
+  webhook moves the payment to `:failed` (reason recorded) or `:cancelled`,
+  keeps the order `:awaiting_payment`, and lets the buyer retry.
+* **Minimal owner pay surface.** `POST /orders/:id/pay` (`PaymentController`,
+  behind `:require_authenticated_user`) authorizes via scope-checked
+  `Orders.get_order/2`, initializes, and 302s to the hosted checkout URL;
+  `OrdersLive` shows the pay form (`#pay-form` → `#pay-button` with the server
+  total) only to the owner of an `:awaiting_payment` order. Guests, strangers,
+  unknown ids, and non-payable orders all fail generically.
+
 ## Accounts and current scope
 
 * `Cass.Accounts` owns `cass_users`, `cass_users_tokens`, `cass_user_roles`,

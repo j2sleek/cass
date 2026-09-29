@@ -37,6 +37,22 @@ config :cass,
   # production, where the endpoint forces HTTPS. Overridden in config/prod.exs.
   secure_cookies: false
 
+# Paystack adapter defaults. `:secret_key` is deliberately absent here: it is
+# a runtime secret injected per environment (dummy in dev/test, `PAYSTACK_SECRET_KEY`
+# in prod via `config/runtime.exs`). Tests swap in `:req_options` to route all
+# adapter HTTP through `Req.Test`.
+config :cass, :paystack, base_url: "https://api.paystack.co"
+
+# The registry of payment provider adapters (`Cass.Payments.Providers`).
+# Enabling a provider here (with its adapter module) is the only step needed
+# to make it usable by `Cass.Payments`. Provider-specific secrets live under
+# their own key (`:cass, :paystack`) so they can be injected at runtime per
+# environment without touching this shared file.
+config :cass, Cass.Payments,
+  providers: [
+    paystack: [module: Cass.Payments.Providers.Paystack, enabled: true]
+  ]
+
 # Configure the endpoint
 config :cass, CassWeb.Endpoint,
   url: [host: "localhost"],

@@ -18,7 +18,8 @@ is a `Product` with a closed product-type vocabulary
 (`cass_product_variants`). A customer can now sign in, pick a variant and
 quantity on a product page, and check out: `Cass.Orders` resolves, prices, and
 reserves stock in one transaction, snapshots each line into `cass_order_items`,
-and `/orders` lists the purchase. Payment capture, transfers, and AI features
+and `/orders` lists the purchase. Payment capture now works end to end through
+Paystack (hosted checkout); vendor transfers, fulfillment, and AI features
 arrive in later milestones and are **not** available yet.
 
 ## Requirements
@@ -203,6 +204,39 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   anything else renders not-found). No payment capture, no vendor side of
   orders, no fulfillment beyond the `Cass.Fulfillment` seam.
 
+### Payments and capture (Milestone 6)
+
+* **`Cass.Payments` is the payments boundary** — payment rows snapshot the
+  order's money (`amount_cents`/`currency` from the order total), name the
+  `provider`, `provider_reference` (CASS-generated, e.g. `PY-…`), checkout URL,
+  and `metadata`; statuses `pending/processing/succeeded/failed/cancelled`
+  (`expired`/`refunded` reserved) with a partial unique index on
+  `(provider, provider_reference)`.
+* **Provider-agnostic by design** — `Cass.Payments.Provider` behaviour +
+  `Cass.Payments.Providers` config-driven registry
+  (`config :cass, Cass.Payments, providers:`); disabled/unknown providers
+  resolve to `{:error, :unknown_provider}`. Adapters (`Paystack` first) are
+  thin, stateless HTTP clients (`Req`, bearer auth) producing
+  `InitResult`/`CaptureResult` structs and never touch orders, users, or the DB.
+* **Idempotent from both directions** — re-initializing a live attempt returns
+  the same checkout URL without recontacting the provider; a provider failure
+  records `:failed` + reason and lets a retry start fresh. A duplicate *success*
+  webhook is a committed no-op, so nothing is ever paid twice; a captured
+  amount/currency that doesn't match the snapshot is refused outright.
+* **Webhooks are signed, not session-auth'd** — `POST /webhooks/paystack`
+  sits outside `:browser`; a custom body reader hands the controller the exact
+  bytes and the adapter HMAC-SHA512-verifies `x-paystack-signature` against
+  them. Bad signatures get a terse 400, unknown refs a 404, success a 200 ack.
+* **Success pays payment + order in one `Repo.transact`** —
+  payment → `:succeeded` (+`paid_at`) and `Orders.mark_order_paid/1`
+  (`:awaiting_payment → :paid`, idempotent) commit or roll back together; no
+  DB transaction ever waits on a call to the provider. Reported failure only
+  deflates the payment to `:failed`/`:cancelled`, leaving the order retryable.
+* **Owner-only pay surface** — `POST /orders/:id/pay` authorizes by scope,
+  redirects to the hosted Paystack checkout, and refuses everything else with
+  non-enumerable generic messages; `OrdersLive` shows the pay form (server total
+  on the button) only for the owner of an awaiting-payment order.
+
 ### Catalog (Milestone 2)
 
 * **Catalog domain** — `categories` and `products` tables (migrations in
@@ -251,10 +285,12 @@ See [docs/architecture.md](docs/architecture.md) for details.
    (ownership *transfer* is deliberately deferred: deleting an account that
    still owns products is refused by the database)
 8. ~~Checkout and order flow (order items consume variant pricing/stock)~~
-9. Payments and fulfillment (capture `awaiting_payment` orders, drive the
-   lifecycle, hand off to `Cass.Fulfillment.kind_for/1`)
-10. AI tools routed through the Nexus AI Gateway
-11. JSON catalog API under `/api/v1` (optional, additive)
+9. ~~Payments (capture `awaiting_payment` orders through Paystack, provider
+   boundary designed so more gateways slot in)~~
+10. Fulfillment (hand off paid orders to `Cass.Fulfillment.kind_for/1`),
+    vendor transfers/settlements, and account deletion end to end
+11. AI tools routed through the Nexus AI Gateway
+12. JSON catalog API under `/api/v1` (optional, additive)
 
 Payments, physical product fulfillment, and live AI integrations are scoped to
 later milestones.

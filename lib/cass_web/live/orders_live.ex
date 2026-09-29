@@ -23,6 +23,7 @@ defmodule CassWeb.OrdersLive do
     |> assign(:robots, "noindex, nofollow")
     |> assign(:order, nil)
     |> assign(:order_not_found, false)
+    |> assign(:can_pay?, false)
     |> ok()
   end
 
@@ -39,6 +40,7 @@ defmodule CassWeb.OrdersLive do
         <.order_show
           order={@order}
           order_not_found={@order_not_found}
+          can_pay?={@can_pay?}
           admin?={Cass.Accounts.Scope.admin?(@current_scope)}
         />
       <% else %>
@@ -118,6 +120,7 @@ defmodule CassWeb.OrdersLive do
 
   attr :order, :any, required: true
   attr :order_not_found, :boolean, required: true
+  attr :can_pay?, :boolean, required: true
   attr :admin?, :boolean, required: true
 
   defp order_show(assigns) do
@@ -210,9 +213,28 @@ defmodule CassWeb.OrdersLive do
                 </div>
               </dl>
 
+              <%= if @can_pay? do %>
+                <.form
+                  for={to_form(%{}, as: "order_payment")}
+                  id="pay-form"
+                  action={~p"/orders/#{@order.id}/pay"}
+                  method="post"
+                  class="mt-6"
+                >
+                  <button
+                    id="pay-button"
+                    type="submit"
+                    class="w-full rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                  >
+                    Pay via Paystack · {money(@order.total_cents, @order.currency)}
+                  </button>
+                </.form>
+              <% end %>
+
               <p class="mt-6 rounded-xl bg-zinc-50 p-4 text-xs leading-5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
-                Everything on this order was captured at the moment of purchase. Payment
-                capture is the next milestone.
+                Everything on this order was captured at the moment of purchase. When you
+                pay, this order moves to <span class="font-medium text-zinc-600 dark:text-zinc-300">paid</span>;
+                delivery is the next milestone.
               </p>
             </div>
           </aside>
@@ -225,6 +247,7 @@ defmodule CassWeb.OrdersLive do
   defp apply_action(socket, :index, _params) do
     socket
     |> assign(:order_not_found, false)
+    |> assign(:can_pay?, false)
     |> refresh_orders()
   end
 
@@ -234,14 +257,25 @@ defmodule CassWeb.OrdersLive do
         socket
         |> assign(:order_not_found, true)
         |> assign(:order, nil)
+        |> assign(:can_pay?, false)
 
       order ->
         socket
         |> assign(:order_not_found, false)
         |> assign(:order, order)
+        |> assign(:can_pay?, can_pay?(socket.assigns.current_scope, order))
         |> assign(:page_title, "#{order.number} · Orders · CASS Marketplace")
     end
   end
+
+  defp can_pay?(scope, %Cass.Orders.Order{status: :awaiting_payment, user_id: user_id}) do
+    case scope do
+      %Cass.Accounts.Scope{user: %Cass.Accounts.User{id: ^user_id}} -> true
+      _other -> false
+    end
+  end
+
+  defp can_pay?(_scope, _order), do: false
 
   defp refresh_orders(socket) do
     stream(socket, :orders, Cass.Orders.list_orders(socket.assigns.current_scope), reset: true)

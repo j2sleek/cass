@@ -17,6 +17,12 @@ defmodule CassWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Provider webhooks are not browser sessions: no session, no CSRF. They are
+  # authorized by the provider signature verified over the raw body.
+  pipeline :webhooks do
+    plug :accepts, ["json"]
+  end
+
   ## Public browsing: the catalog and the authentication entry points.
 
   scope "/", CassWeb do
@@ -53,6 +59,7 @@ defmodule CassWeb.Router do
     end
 
     post "/orders", OrderController, :create
+    post "/orders/:id/pay", PaymentController, :create
     get "/users/settings/confirm-email/:token", UserConfirmationController, :confirm_email
   end
 
@@ -73,6 +80,14 @@ defmodule CassWeb.Router do
     pipe_through :api
 
     get "/health", HealthController, :show
+  end
+
+  ## Provider webhooks (no session, no CSRF — authorization is the signature).
+
+  scope "/webhooks", CassWeb do
+    pipe_through :webhooks
+
+    post "/paystack", PaymentsWebhookController, :paystack
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

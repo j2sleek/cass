@@ -42,3 +42,11 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Paystack adapter for the test environment: a dummy secret (never a real key)
+# and `:req_options` that route every adapter HTTP request through `Req.Test`,
+# so tests stub responses with `Req.Test.stub(:paystack, ...)` and nothing ever
+# leaves the test process.
+config :cass, :paystack,
+  secret_key: "sk_test_dummy_dummy_dummy_dummy_dummy_dummy",
+  req_options: [plug: {Req.Test, :paystack}]

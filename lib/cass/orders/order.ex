@@ -33,6 +33,7 @@ defmodule Cass.Orders.Order do
 
   alias Cass.Accounts.User
   alias Cass.Orders.OrderItem
+  alias Cass.Payments.Payment
 
   @statuses [:awaiting_payment, :paid, :processing, :completed, :cancelled, :failed]
 
@@ -48,6 +49,7 @@ defmodule Cass.Orders.Order do
     belongs_to :user, User
 
     has_many :order_items, OrderItem, foreign_key: :order_id
+    has_many :payments, Payment, foreign_key: :order_id
 
     timestamps(type: :utc_datetime)
   end

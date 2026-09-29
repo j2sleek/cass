@@ -57,7 +57,10 @@ defmodule CassWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    # Webhook controllers need the raw (unparsed) body so provider signatures
+    # can be verified over exactly the bytes that were sent.
+    body_reader: {CassWeb.Plug.RawBodyReader, :read_body, []}
 
   plug Plug.MethodOverride
   plug Plug.Head

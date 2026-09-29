@@ -571,4 +571,47 @@ defmodule Cass.OrdersTest do
       assert is_list(opts)
     end
   end
+
+  describe "mark_order_paid/1" do
+    setup %{category: category} do
+      buyer = scope_for(:customer)
+      %{variant: variant} = checkout_product!(category)
+      {:ok, order} = Orders.create_order(buyer, [%{product_variant_id: variant.id, quantity: 1}])
+      %{order: order}
+    end
+
+    test "moves an awaiting_payment order to paid", %{order: order} do
+      assert {:ok, paid} = Orders.mark_order_paid(order.id)
+      assert paid.id == order.id
+      assert paid.status == :paid
+      assert Cass.Repo.get!(Order, order.id).status == :paid
+    end
+
+    test "accepts a struct or an id", %{order: order} do
+      assert {:ok, %Order{status: :paid}} = Orders.mark_order_paid(order)
+      assert Cass.Repo.get!(Order, order.id).status == :paid
+    end
+
+    test "is idempotent for an already paid order", %{order: order} do
+      assert {:ok, %Order{status: :paid}} = Orders.mark_order_paid(order.id)
+      assert {:ok, %Order{status: :paid}} = Orders.mark_order_paid(order.id)
+    end
+
+    test "refuses any other status with the order untouched", %{order: order} do
+      {1, _} =
+        Cass.Repo.update_all(
+          from(o in Order, where: o.id == ^order.id),
+          set: [status: :cancelled]
+        )
+
+      assert {:error, changeset} = Orders.mark_order_paid(order.id)
+      assert "the order cannot be paid from its current status" in errors_on(changeset).base
+      assert Cass.Repo.get!(Order, order.id).status == :cancelled
+    end
+
+    test "a bogus id is reported distinctly", %{} do
+      assert {:error, :order_not_found} = Orders.mark_order_paid(987_654_321)
+      assert {:error, :order_not_found} = Orders.mark_order_paid(nil)
+    end
+  end
 end
