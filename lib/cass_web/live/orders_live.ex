@@ -234,7 +234,8 @@ defmodule CassWeb.OrdersLive do
               <p class="mt-6 rounded-xl bg-zinc-50 p-4 text-xs leading-5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
                 Everything on this order was captured at the moment of purchase. When you
                 pay, this order moves to <span class="font-medium text-zinc-600 dark:text-zinc-300">paid</span>;
-                delivery is the next milestone.
+                each line is then tracked as its own delivery, and your access is recorded
+                once that delivery completes.
               </p>
             </div>
           </aside>

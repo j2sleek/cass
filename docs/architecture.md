@@ -78,7 +78,8 @@ The role guards (`require_admin_user`, `require_vendor_user`,
 
 Everything sold on CASS is a **Product**. The domain model is
 `Category → Product → Product Type → Product Variant → Order Item` (order items
-and fulfillment integrations land with checkout in a later milestone):
+landed with checkout in Milestone 5 and the delivery chain with payments
+follow-up milestones 6–7):
 
 * A **Product** is what a seller describes and lists: name, description, SEO,
   category, status/visibility lifecycle, and ownership. It says nothing about
@@ -238,6 +239,79 @@ agnostic payments in `Cass.Payments` with Paystack as the first adapter:
   `OrdersLive` shows the pay form (`#pay-form` → `#pay-button` with the server
   total) only to the owner of an `:awaiting_payment` order. Guests, strangers,
   unknown ids, and non-payable orders all fail generically.
+
+## Fulfillment and entitlements (Milestone 7)
+
+Two contexts close the post-payment loop, and the point of keeping them apart is
+that *how* a purchase is delivered and *whether* the buyer may use it are
+different questions:
+
+    paid order → order item → fulfillment → entitlement
+
+Every arrow is a foreign key, so no row can exist without the one it depends on.
+
+* **`Cass.Fulfillment` is the delivery boundary.** It owns `cass_fulfillments`,
+  one row per **purchased line** (an order mixing a digital product and a
+  human-performed service gets a `:digital` and a `:manual` delivery), with a
+  closed status vocabulary (`pending`, `processing`, `fulfilled`, `failed`,
+  `cancelled`) mirrored by a DB CHECK and an explicit transition map
+  (`pending → processing → fulfilled`, `pending|processing → failed|cancelled`,
+  `failed → processing|cancelled`; `:fulfilled` and `:cancelled` are terminal).
+  `kind` (`:digital | :smm | :ai | :manual`) is resolved once from the
+  purchased variant's product type through a single narrow Catalog read —
+  `Catalog.get_product_type_for_variant/1`, a projection that keeps delivery
+  knowledge out of the Catalog and Catalog knowledge out of delivery — and
+  stored, so a delivery worker dispatches on one column and a later catalog edit
+  cannot rewrite how a past purchase must be delivered. `kind_for/1` remains the
+  one type→kind mapping (`:service → :manual`; unknown or future types degrade
+  to `:manual` rather than raising).
+* **The paid order is the only authority.** `create_for_paid_order/1` is the
+  only way a fulfillment comes into existence and it asks
+  `Orders.get_paid_order/1` — not its own judgment — whether the money is
+  proven, re-reading the stored row even when handed a struct so a stale or
+  forged `%Order{}` cannot unlock anything. Payment verification stays inside
+  `Cass.Payments`; this context never talks to a provider, never sees a webhook
+  body, and never re-checks an amount. Fulfillment never runs in reverse either:
+  nothing in `Cass.Payments` or `Cass.Orders` calls into here, so a capture
+  creates no deliveries implicitly and a future trigger (webhook handler,
+  worker, admin action) decides *when* to act on a paid order.
+* **Idempotency is a database property, not a convention.** A unique index on
+  `cass_fulfillments.order_item_id` plus `INSERT … ON CONFLICT DO NOTHING`
+  (never read-then-write) means a retried trigger, a duplicated queue job, and a
+  concurrent duplicate all converge on the same row: the loser gets the winner's
+  record back, and duplicate calls are successes, not errors. All lines of an
+  order are written in one `Repo.transact`, so an order is never half-fulfilled.
+* **`Cass.Entitlements` is the grant boundary.** `cass_entitlements` is 1:1 with
+  the purchased line *and* with the delivery that granted it (both columns
+  unique), and it **snapshots** the purchase (product/variant name, SKU,
+  quantity, product type, metadata) from the immutable order item, so renaming
+  or re-pricing the catalog later cannot rewrite what the buyer bought and the
+  row stays readable without joining back. `grant_for_fulfillment/2` is public
+  only in the sense that `Cass.Fulfillment` calls it: it is invoked from
+  `mark_fulfilled/1` inside that transition's own transaction (completion and
+  grant commit or roll back together), and it refuses a fulfillment/order-item
+  pair that does not describe the same purchase, so no caller can graft one
+  purchase's grant onto another delivery. Statuses are `active`, `revoked`, and
+  the reserved `expired`; `expires_at` is honest already —
+  `Entitlement.active?/1` reports `false` for an elapsed `expires_at` before any
+  expiry job exists — and `revoke_entitlement/2` is a withdrawal (`revoked_at` +
+  `revoked_reason`), never a delete.
+* **Reads are owner-or-admin; writes are server-side.** `list_for_customer/1`,
+  `get_fulfillment/2`, and `list_for_order/2` (and the entitlement twins)
+  resolve a `Cass.Accounts.Scope` exactly like `Cass.Orders`: everything for an
+  admin, the caller's own rows otherwise, nothing for a guest, and `nil` for a
+  foreign, malformed, or unknown id so ids cannot be probed. An order listing
+  goes through `Orders.get_order/2` first, so it can never be wider than the
+  order the scope may already see. A vendor is a seller, not a delivery
+  operator, so the role grants no extra visibility here. Writes take no scope
+  and are not reachable from a request: no route exposes fulfillment,
+  entitlement, or revocation in this milestone, the same posture as
+  `Orders.mark_order_paid/1`.
+* **No provider integration yet.** This milestone stops at the domain boundary:
+  `kind` is recorded and the lifecycle is driven explicitly. The delivery
+  workers it exists for (a `:digital` file, a `:smm` provider call, a `:manual`
+  hand-off, an `:ai` grant) come later, and the chain is built so each of them
+  only has to claim a row and report an outcome.
 
 ## Accounts and current scope
 

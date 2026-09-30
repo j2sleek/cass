@@ -4,8 +4,8 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 5 (transactional checkout with atomic stock
-reservation).** This release ships the server-rendered storefront catalog, a
+**Status: Milestone 7 (post-payment fulfillment and durable entitlements).**
+This release ships the server-rendered storefront catalog, a
 complete, session-based account system (registration with emailed confirmation,
 login with an optional 14-day remembered session, password reset, and account
 settings), a minimal role system where every account is a customer and
@@ -18,9 +18,13 @@ is a `Product` with a closed product-type vocabulary
 (`cass_product_variants`). A customer can now sign in, pick a variant and
 quantity on a product page, and check out: `Cass.Orders` resolves, prices, and
 reserves stock in one transaction, snapshots each line into `cass_order_items`,
-and `/orders` lists the purchase. Payment capture now works end to end through
-Paystack (hosted checkout); vendor transfers, fulfillment, and AI features
-arrive in later milestones and are **not** available yet.
+and `/orders` lists the purchase. Payment capture works end to end through
+Paystack (hosted checkout), and a captured order now **owes deliveries**:
+`Cass.Fulfillment` turns each paid line into a tracked delivery
+(`cass_fulfillments`) and `Cass.Entitlements` grants the buyer a durable,
+snapshotted entitlement (`cass_entitlements`) when that delivery completes.
+Delivery workers, vendor transfers, and AI features arrive in later milestones
+and are **not** available yet.
 
 ## Requirements
 
@@ -237,6 +241,54 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   non-enumerable generic messages; `OrdersLive` shows the pay form (server total
   on the button) only for the owner of an awaiting-payment order.
 
+### Fulfillment and entitlements (Milestone 7)
+
+* **The chain is one-directional, and every arrow is a foreign key** —
+  `paid order → order item → fulfillment → entitlement`. A fulfillment says
+  *how* a purchase is delivered; an entitlement says the purchase succeeded and
+  the buyer may use it. Keeping them apart is what lets a delivery be retried,
+  re-routed, or handed to a human without touching the grant. See
+  [docs/data-model.md](docs/data-model.md).
+* **One delivery per purchased line** — `Cass.Fulfillment` turns each line of a
+  paid order into a `cass_fulfillments` row with a stored `kind`
+  (`:digital | :smm | :ai | :manual`, resolved once from the purchased product
+  type by the single `kind_for/1` mapping) and an explicit lifecycle:
+  `pending → processing → fulfilled`, `pending|processing → failed|cancelled`,
+  `failed → processing|cancelled`, with `fulfilled`/`cancelled` terminal. An
+  order mixing a digital product and a service gets a `:digital` and a
+  `:manual` delivery, each tracked separately.
+* **The paid order is the only authority** —
+  `create_for_paid_order/1` asks `Orders.get_paid_order/1`, not its own
+  judgment, and re-reads the stored row even when handed a struct, so a stale or
+  forged `%Order{status: :paid}` unlocks nothing. Unknown, unpaid, and malformed
+  references return the same `:base` refusal and write nothing. Fulfillment
+  never runs in reverse: a capture creates no deliveries implicitly, and this
+  layer never touches a provider, a webhook body, or an amount.
+* **Idempotency is a database property** — a unique index on
+  `cass_fulfillments.order_item_id` plus `ON CONFLICT DO NOTHING` (never
+  read-then-write) makes the trigger safe to replay and safe to run
+  concurrently: duplicate calls return the same row, and every line of an order
+  is written in one transaction so an order is never half-fulfilled.
+* **Completion and grant are one transaction** — `mark_fulfilled/1` writes
+  `:fulfilled (+delivered_at)` and grants the entitlement together, so a
+  delivery is never reported complete without the grant it implies.
+  `cass_entitlements` is 1:1 with the purchased line *and* with the delivery
+  that granted it (both unique), and snapshots the purchase (name, SKU,
+  quantity, type, metadata) from the immutable order item, so later catalog
+  edits cannot rewrite what the buyer bought.
+* **Grants are honest and reversible** — statuses `active`/`revoked` plus the
+  reserved `expired`; `Entitlement.active?/1` already reports `false` for an
+  elapsed `expires_at`, and `revoke_entitlement/2` withdraws the grant
+  (`revoked_at` + reason) instead of deleting it. No delivery worker exists yet:
+  the milestone stops at the domain boundary, with `kind` recorded and the
+  lifecycle driven explicitly.
+* **Reads are owner-or-admin, writes are server-side** — the read functions
+  take a `Cass.Accounts.Scope` (admin sees all, a buyer sees their own, guests
+  see nothing, a foreign/unknown/malformed id is `nil` so ids cannot be probed),
+  and an order listing goes through `Orders.get_order/2` so it is never wider
+  than the order the scope may already see. Writes take no scope and have no
+  route in this milestone. The `:vendor` role gets no extra visibility here.
+
 ### Catalog (Milestone 2)
 
 * **Catalog domain** — `categories` and `products` tables (migrations in
@@ -287,13 +339,16 @@ See [docs/architecture.md](docs/architecture.md) for details.
 8. ~~Checkout and order flow (order items consume variant pricing/stock)~~
 9. ~~Payments (capture `awaiting_payment` orders through Paystack, provider
    boundary designed so more gateways slot in)~~
-10. Fulfillment (hand off paid orders to `Cass.Fulfillment.kind_for/1`),
-    vendor transfers/settlements, and account deletion end to end
+10. ~~Fulfillment (`Cass.Fulfillment`): a paid order owes one tracked delivery
+    per purchased line, and completing one grants a durable
+    `Cass.Entitlements` grant~~ — plus vendor transfers/settlements and account
+    deletion end to end
 11. AI tools routed through the Nexus AI Gateway
 12. JSON catalog API under `/api/v1` (optional, additive)
 
-Payments, physical product fulfillment, and live AI integrations are scoped to
-later milestones.
+Delivery workers (digital downloads, SMM provider calls, AI credit issuance),
+physical product fulfillment, and live AI integrations are scoped to later
+milestones.
 
 ## Learn more
 

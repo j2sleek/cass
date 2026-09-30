@@ -402,6 +402,37 @@ defmodule Cass.Catalog do
   @doc "Returns the closed vocabulary of product types."
   def product_types, do: Ecto.Enum.values(Product, :product_type)
 
+  @doc """
+  Returns the `product_type` of the product that owns `variant_id`.
+
+  A deliberately narrow projection: the Fulfillment boundary needs to know *what
+  kind of thing* was purchased (to pick a delivery mechanism via
+  `Cass.Fulfillment.kind_for/1`) and nothing else about the catalog row, so this
+  returns a single atom rather than a `%Product{}`. Returning the product struct
+  instead would hand the fulfillment boundary a full catalog read it has no
+  business performing, and re-introduce the unfiltered `get_product!/1` fetch
+  that ownership removed on purpose.
+
+  Returns `{:ok, product_type}` or `{:error, :unknown_variant}`. The lookup is
+  safe to rely on for a historical purchase: `cass_product_variants.product_id`
+  and `cass_order_items.product_variant_id` are both `on_delete: :restrict`, so a
+  purchased variant's product can never disappear, and the fulfillment and
+  entitlement rows snapshot the resolved type when they are created.
+  """
+  def get_product_type_for_variant(variant_id) when is_integer(variant_id) do
+    case Repo.one(
+           from v in ProductVariant,
+             join: p in assoc(v, :product),
+             where: v.id == ^variant_id,
+             select: p.product_type
+         ) do
+      nil -> {:error, :unknown_variant}
+      product_type -> {:ok, product_type}
+    end
+  end
+
+  def get_product_type_for_variant(_variant_id), do: {:error, :unknown_variant}
+
   ## Product variants
 
   @doc """

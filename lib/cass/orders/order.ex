@@ -40,6 +40,25 @@ defmodule Cass.Orders.Order do
   @doc "Returns the closed vocabulary of order statuses."
   def statuses, do: @statuses
 
+  # An order reaches `:paid` only through `Cass.Payments`, so every status after
+  # it is downstream of a proven payment and implies the order was paid. The
+  # fulfillment boundary uses this to ask "has this order been paid?" without
+  # re-implementing (or second-guessing) the order state machine: a
+  # `:processing`/`:completed` order is still a paid order, while
+  # `:awaiting_payment`, `:cancelled`, and `:failed` are not.
+  @paid_statuses [:paid, :processing, :completed]
+
+  @doc """
+  Returns the statuses that can only be reached after the order was paid.
+
+  ## Examples
+
+      iex> Cass.Orders.Order.paid_statuses()
+      [:paid, :processing, :completed]
+
+  """
+  def paid_statuses, do: @paid_statuses
+
   schema "cass_orders" do
     field :number, :string
     field :status, Ecto.Enum, values: @statuses, default: :awaiting_payment
@@ -50,9 +69,25 @@ defmodule Cass.Orders.Order do
 
     has_many :order_items, OrderItem, foreign_key: :order_id
     has_many :payments, Payment, foreign_key: :order_id
+    has_many :fulfillments, Cass.Fulfillment.Fulfillment, foreign_key: :order_id
 
     timestamps(type: :utc_datetime)
   end
+
+  @doc """
+  Returns true when the order's status implies payment has been proven.
+
+  ## Examples
+
+      iex> Cass.Orders.Order.paid?(%Cass.Orders.Order{status: :paid})
+      true
+
+      iex> Cass.Orders.Order.paid?(%Cass.Orders.Order{status: :awaiting_payment})
+      false
+
+  """
+  def paid?(%__MODULE__{status: status}), do: status in @paid_statuses
+  def paid?(_order), do: false
 
   @doc false
   def changeset(order, attrs) do

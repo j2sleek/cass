@@ -496,6 +496,64 @@ is invalid". A direct caller learns nothing about *cause* or *which* item.
 * **No audit trail** for publish/archive/ownership changes, consistent with
   Phase 2's role limitation.
 
+## Fulfillment and entitlements (Milestone 7)
+
+This milestone adds no HTTP surface at all: no route, no LiveView, no form.
+That is the primary security property, so it is stated first.
+
+* **Nothing is reachable from a request.** `Cass.Fulfillment.create_for_paid_order/1`,
+  the `mark_processing/1`/`mark_fulfilled/1`/`mark_failed/2`/`mark_cancelled/1`
+  transitions, `Cass.Entitlements.grant_for_fulfillment/2`, and
+  `revoke_entitlement/2` take **no scope** and have no route, in the same
+  posture as `Cass.Orders.mark_order_paid/1` (which only `Cass.Payments` calls,
+  after a signature-verified capture). A request body can never name a
+  `user_id`, an `order_id`, an `order_item_id`, a `kind`, or a grant. The router
+  diff for this milestone is empty by design.
+* **Ownership is derived, never supplied.** `cass_fulfillments.user_id` is
+  copied from the paid order and `cass_entitlements.user_id` from the
+  fulfillment; neither appears in a changeset cast list, so a submitted
+  `user_id` is ignored — the same rule as `orders.user_id`.
+* **The paid order is the authorization for creating anything.**
+  `create_for_paid_order/1` re-reads the stored order through
+  `Orders.get_paid_order/1` even when it is handed a struct, so a stale or
+  forged `%Order{status: :paid}` cannot unlock a delivery. Unknown, unpaid, and
+  malformed references return the *same* `:base` changeset
+  ("the order has not been paid") and write nothing, so the boundary cannot be
+  used to probe which order ids exist. Payment verification itself remains
+  entirely inside `Cass.Payments`, which owns provider signature checks; this
+  layer never handles a webhook body, a provider secret, or an amount.
+* **Reads are owner-or-admin, and non-enumerable.** `list_for_customer/1`,
+  `get_fulfillment/2`, and `list_for_order/2` (plus the entitlement twins) take
+  a `Cass.Accounts.Scope`: an admin sees everything, a buyer sees only their
+  own, a guest sees nothing, and a foreign, malformed, or unknown id is `nil` —
+  indistinguishable from a missing row, so fulfillment and entitlement ids
+  cannot be enumerated. `list_for_order/2` resolves the order through
+  `Orders.get_order/2` first, so an order listing is never wider than the order
+  the scope may already see.
+* **The vendor role grants nothing here.** A vendor is a seller, not a delivery
+  operator: `:vendor` gets no extra visibility over deliveries or entitlements,
+  so possessing it cannot be escalated into reading a buyer's grants.
+* **Database constraints back up every application check.** Closed vocabularies
+  (`status`, `kind`, `product_type`) and positive quantities are CHECK
+  constraints, mirroring the Ecto enums; every foreign key is
+  `on_delete: :restrict`, so deleting a catalog row, order, or account can never
+  silently destroy a delivery obligation or a grant. The unique indexes on
+  `cass_fulfillments.order_item_id`, `cass_entitlements.order_item_id`, and
+  `cass_entitlements.fulfillment_id` make duplicate work impossible even against
+  a direct write or a racing worker, rather than relying on a read-then-write
+  check in application code.
+* **Grants are append-only history.** Revocation is a withdrawal
+  (`status`/`revoked_at`/`revoked_reason`), never a delete, and a completed or
+  cancelled delivery is terminal — so a grant cannot be orphaned by a later
+  cancel and a support question about a revoked purchase still has an answer.
+* **Known gaps, deliberately.** There is no audit trail for delivery
+  transitions or entitlement revocations, no admin/support surface to review,
+  and no download accounting yet; those arrive with the delivery workers and
+  the admin milestone, and the tests in
+  `test/cass/fulfillment_test.exs`, `test/cass/entitlements_test.exs`,
+  `test/cass/fulfillment_concurrency_test.exs`, and
+  `test/cass/fulfillment_integration_test.exs` cover the rules above.
+
 ## Input handling conventions (for future features)
 
 * `String.to_atom/1` is forbidden on user input (atom-table exhaustion

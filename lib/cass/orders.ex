@@ -171,6 +171,45 @@ defmodule Cass.Orders do
 
   def mark_order_paid(_order_id), do: {:error, :order_not_found}
 
+  @doc """
+  Fetches an order for a server-side caller that may only act on a **paid** order.
+
+  This is the seam the Fulfillment boundary consumes: payment verification stays
+  inside `Cass.Payments`, and everything downstream of a capture asks this
+  function instead of reading `cass_orders` itself or re-deciding what "paid"
+  means. `Cass.Fulfillment.create_for_paid_order/1` uses it as its authoritative
+  gate, so an order that never reached the paid states can never produce a
+  fulfillment or an entitlement.
+
+  The order is returned with its snapshot items preloaded (fulfillment is
+  created per purchased line). Because the paid statuses are downstream-only,
+  an order that has advanced to `:processing`/`:completed` still counts as paid.
+
+  Returns `{:ok, order}`, or:
+
+    * `{:error, :order_not_found}` — no such order (or a malformed id);
+    * `{:error, :not_paid}` — the order exists but is not paid.
+
+  This function is intentionally **not** scope-based: like `mark_order_paid/1`
+  it is a boundary-to-boundary call made by trusted server code, never by a
+  request. Reading an order *for a user* stays `get_order/2`.
+  """
+  def get_paid_order(order_id) when is_integer(order_id) do
+    case Repo.get(Order, order_id) do
+      nil ->
+        {:error, :order_not_found}
+
+      %Order{} = order ->
+        if Order.paid?(order) do
+          {:ok, Repo.preload(order, :order_items)}
+        else
+          {:error, :not_paid}
+        end
+    end
+  end
+
+  def get_paid_order(_order_id), do: {:error, :order_not_found}
+
   ## Checkout internals
 
   # Combines duplicated variant ids and validates the shape of every requested
