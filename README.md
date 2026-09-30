@@ -4,7 +4,7 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 7 (post-payment fulfillment and durable entitlements).**
+**Status: Milestone 8 (delivery and access for digital purchases).**
 This release ships the server-rendered storefront catalog, a
 complete, session-based account system (registration with emailed confirmation,
 login with an optional 14-day remembered session, password reset, and account
@@ -22,9 +22,13 @@ and `/orders` lists the purchase. Payment capture works end to end through
 Paystack (hosted checkout), and a captured order now **owes deliveries**:
 `Cass.Fulfillment` turns each paid line into a tracked delivery
 (`cass_fulfillments`) and `Cass.Entitlements` grants the buyer a durable,
-snapshotted entitlement (`cass_entitlements`) when that delivery completes.
-Delivery workers, vendor transfers, and AI features arrive in later milestones
-and are **not** available yet.
+snapshotted entitlement (`cass_entitlements`) when that delivery completes. A
+completed digital purchase is now **exercisable**: `Cass.Delivery` answers *how*
+the right is used, separately from the entitlement that proves it, and
+`/purchases/:id` shows the buyer their access code, reachable from their own
+order page. SMM/AI/manual delivery, real download infrastructure, vendor
+transfers, and AI features arrive in later milestones and are **not** available
+yet.
 
 ## Requirements
 
@@ -289,6 +293,46 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   than the order the scope may already see. Writes take no scope and have no
   route in this milestone. The `:vendor` role gets no extra visibility here.
 
+### Delivery and access (Milestone 8)
+
+* **An entitlement is not a delivery** — an entitlement answers *"does this
+  customer hold the right?"*; `Cass.Delivery` answers the separate question
+  *"how is that right exercised?"*. Keeping them apart is what lets the delivery
+  *mechanism* change without touching an ownership, revocation, or
+  purchase-history fact. See [docs/architecture.md](docs/architecture.md).
+* **No new table, deliberately** — every input an access decision needs is
+  already stored and immutable: `cass_fulfillments` owns the delivery lifecycle
+  and its `kind`, `cass_entitlements` owns ownership, status, expiry, and the
+  purchase snapshot including the vendor's delivery metadata. A
+  `cass_deliveries` table would re-store `user_id`/`order_id`/`order_item_id`
+  beside a second lifecycle, with no new fact to show for it. The
+  provider-facing state a real object store or SMM API will need is reserved
+  for a future delivery-attached table.
+* **One authoritative decision** — `Delivery.authorize_access/2` grants only
+  when an authenticated scope owns an *active* entitlement whose delivery kind
+  has a mechanism. Ownership is resolved by `Entitlements.get_entitlement/2`
+  (owner-or-admin), state by the centralized `Entitlement.active?/1`, and there
+  is no `user_id` parameter a request could supply.
+* **A kind is not a mechanism** — `Fulfillment.kind` is the only taxonomy
+  (`digital | smm | ai | manual`, with `:service → :manual`), and
+  `Delivery.mechanism_for/1` is the single extension point. Only
+  `:digital → :access_code` is implemented; `:smm`, `:ai`, and `:manual` are
+  resolved but not yet exercisable, and they **refuse** rather than invent a
+  placeholder capability. No provider behaviour and no provider registry yet —
+  one implementation is not a reason to build speculative infrastructure.
+* **The capability is a narrowed struct, not a re-serialized entitlement** —
+  `Cass.Delivery.Access` is built from named fields and has no `metadata` field,
+  so no vendor-authored value (a URL, an API key, a token) can reach a buyer
+  through a filter that someone could later forget to update. The access code
+  is derived from an HMAC over the immutable purchased-line id, so it is
+  deterministic per purchase, unforgeable without the server secret, and
+  inspect-safe.
+* **Refusals are indistinguishable** — unknown, foreign, revoked, elapsed, and
+  not-yet-exercisable all return the same `:base` error and render the same
+  not-found page, so a probe cannot learn whether an id exists, whose it was, or
+  why it failed. `/purchases/:id` is `noindex` and reachable from the buyer's own
+  order page rather than from a listing or dashboard.
+
 ### Catalog (Milestone 2)
 
 * **Catalog domain** — `categories` and `products` tables (migrations in
@@ -346,9 +390,12 @@ See [docs/architecture.md](docs/architecture.md) for details.
 11. AI tools routed through the Nexus AI Gateway
 12. JSON catalog API under `/api/v1` (optional, additive)
 
-Delivery workers (digital downloads, SMM provider calls, AI credit issuance),
-physical product fulfillment, and live AI integrations are scoped to later
-milestones.
+**Not started:** delivery workers (SMM provider calls, AI credit issuance), real
+download storage, signed URLs, physical product fulfillment, and live AI
+integrations. Milestone 8 delivers a local digital access code only; the other
+three kinds resolve but refuse, and each one that gains a real mechanism is a
+single clause in `Delivery.mechanism_for/1` plus its representation in
+`Cass.Delivery.Access`.
 
 ## Learn more
 

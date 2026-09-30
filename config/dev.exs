@@ -60,6 +60,11 @@ config :cass, dev_routes: true
 # passed through `config/runtime.exs`.
 config :cass, :paystack, secret_key: "sk_test_dev_dummy_dummy_dummy_dummy_dummy"
 
+# A dummy delivery signing secret for development, long enough to satisfy the
+# minimum. Real deployments inject `DELIVERY_ACCESS_SECRET` through
+# `config/runtime.exs`.
+config :cass, Cass.Delivery, access_secret: "dev_dummy_delivery_access_secret_change_me_0001"
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 

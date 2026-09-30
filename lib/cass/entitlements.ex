@@ -257,8 +257,14 @@ defmodule Cass.Entitlements do
     end
   end
 
+  # `:fulfillment` is preloaded so a consumer that needs the delivery mechanism
+  # that granted a right can follow the 1:1 `fulfillment_id` without a second
+  # query — and, more importantly, without a second ownership decision. The
+  # owner-or-admin filter is already applied above, so anything reached through
+  # this query is already authorized; `Cass.Delivery` reuses that rather than
+  # re-deriving who may read what.
   defp read_query do
-    from e in Entitlement, order_by: [desc: e.granted_at, desc: e.id]
+    from e in Entitlement, order_by: [desc: e.granted_at, desc: e.id], preload: [:fulfillment]
   end
 
   # The single shape of a refusal, matching the catalog, orders, and payments

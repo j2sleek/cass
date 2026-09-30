@@ -130,8 +130,17 @@ defmodule CassWeb.UserAuthTest do
       session = conn.private[:plug_session]
 
       assert session["user_token"] == get_session(conn, :user_token)
-      refute inspect(session) =~ "admin"
-      refute inspect(session) =~ to_string(user.id)
+
+      # The identity check runs over everything *except* the opaque token, which
+      # is `:crypto.strong_rand_bytes/1`. Substring-matching a short user id
+      # against 32 random bytes is a coin flip — the id's digits can appear in
+      # the rendered binary by chance — so including it here tested luck, not
+      # security. The token is random bytes with no structure, so it cannot
+      # carry the id; what matters is that no *readable* session value does.
+      readable = inspect(Map.delete(session, "user_token"))
+
+      refute readable =~ "admin"
+      refute readable =~ to_string(user.id)
     end
 
     test "resumes a session from the signed remember me cookie", %{conn: conn, user: user} do

@@ -45,6 +45,12 @@ if config_env() == :prod do
   # clear error the first time a payment is actually attempted.
   config :cass, :paystack, secret_key: System.get_env("PAYSTACK_SECRET_KEY")
 
+  # The secret used to sign a buyer's delivery access code. Optional at boot for
+  # the same reason as the payment secret: nothing derives a credential until a
+  # delivery is actually accessed, and that first access raises a clear error
+  # naming the missing variable.
+  config :cass, Cass.Delivery, access_secret: System.get_env("DELIVERY_ACCESS_SECRET")
+
   database_url =
     System.get_env("DATABASE_URL") ||
       raise """

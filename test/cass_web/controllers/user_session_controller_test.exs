@@ -46,8 +46,17 @@ defmodule CassWeb.UserSessionControllerTest do
       session = conn.private[:plug_session]
 
       assert Enum.sort(Map.keys(session)) == ["live_socket_id", "phoenix_flash", "user_token"]
-      refute inspect(session) =~ "admin"
-      refute inspect(session) =~ to_string(user.id)
+
+      # `user_token` is 32 random bytes and `live_socket_id` is derived from it,
+      # so neither can be substring-matched for an identity: a short user id
+      # appears inside random bytes by chance often enough to make such a
+      # check flaky. Neither can carry the id in any structured sense, and the
+      # key assertion above already pins the cookie's shape — so the identity
+      # check covers the part of the cookie a client can actually read and edit.
+      readable = inspect(Map.drop(session, ["user_token", "live_socket_id"]))
+
+      refute readable =~ "admin"
+      refute readable =~ to_string(user.id)
     end
 
     test "ignores role parameters in the log in form", %{conn: conn, user: user} do

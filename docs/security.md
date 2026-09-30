@@ -37,6 +37,12 @@ talks to external LLM providers directly:
   defaults.
 * Production secrets are injected via `config/runtime.exs` environment
   variables.
+* `DELIVERY_ACCESS_SECRET` (Milestone 8) signs the digital access code. It is
+  read per issuance rather than compiled in, is required to be at least 32
+  bytes, and a missing or short value **raises** instead of falling back to a
+  default — a misconfigured deploy fails loudly rather than handing out
+  guessable codes. The value is never returned to a client, never logged, and
+  never included in an error message.
 * The health endpoint never returns connection details, hostnames, ports, or
   credentials (enforced by `test/cass_web/controllers/api/v1/health_controller_test.exs`).
 
@@ -553,6 +559,52 @@ That is the primary security property, so it is stated first.
   `test/cass/fulfillment_test.exs`, `test/cass/entitlements_test.exs`,
   `test/cass/fulfillment_concurrency_test.exs`, and
   `test/cass/fulfillment_integration_test.exs` cover the rules above.
+
+## Delivery and access (Milestone 8)
+
+This milestone adds the first read surface over a grant: one authenticated
+route, `/purchases/:id`, that shows a buyer how to use a purchase they hold.
+
+* **Authorization is derived from the session, never from the request.**
+  `Delivery.authorize_access/2` takes a `Cass.Accounts.Scope` and an
+  entitlement id. There is no `user_id`, `customer_id`, or `owner_id` parameter
+  anywhere on the path, so there is no field for a caller to forge — the only
+  identity in play is the scope `CassWeb.UserAuth` resolved server-side.
+* **One authoritative decision, composed from centralized facts.**
+  The check grants only when an authenticated scope owns an *active* entitlement
+  whose delivery kind has a mechanism. Ownership comes from
+  `Entitlements.get_entitlement/2` (owner-or-admin, already non-enumerable) and
+  state from the centralized `Entitlement.active?/1`, so a revoked grant and a
+  grant whose `expires_at` has elapsed are both refused without this layer
+  reimplementing the rule — and without a second place for it to be wrong.
+* **Refusals are indistinguishable.** Unknown id, somebody else's id, revoked,
+  elapsed, and not-yet-exercisable all return the same `:base` error from the
+  same `refuse/0`, and the web layer renders all of them as the same not-found
+  page. A probe cannot learn whether an entitlement id exists, whose it was, or
+  why access failed. The two pages are identical in their visible text, which is
+  pinned by test.
+* **The capability cannot carry a leak.** `Cass.Delivery.Access` is built from
+  named fields and has no `metadata` field at all, so the vendor's
+  catalog-authored delivery instructions — a download URL, an API key, a token, a
+  license pool — have no path to a buyer. The rule is structural rather than a
+  filter, so there is no allow-list to forget to update later. The
+  `:access_code` field is excluded from `Inspect`, so an accidental
+  `IO.inspect(access)` cannot put a live credential in a log.
+* **The credential is not forgeable.** The access code is an HMAC-SHA256 over the
+  entitlement's immutable `order_item_id` under `DELIVERY_ACCESS_SECRET`,
+  truncated to 80 bits and rendered in a Crockford-style alphabet. A buyer
+  cannot invent a code for a purchase they do not hold, and an HMAC output
+  reveals nothing about the secret. Its derivation is **private**: a public
+  "give me the code for this entitlement" function would be an authority-free
+  second way to mint a credential, and would quietly become the real access
+  decision.
+* **The surface is narrow on purpose.** One route, no listing, no dashboard, and
+  the page is `noindex`. It is reached from the buyer's own order page, which
+  links only the lines the delivery context reports as exercisable. There is
+  nowhere to enumerate, and nothing to see before signing in.
+* **Unimplemented kinds fail closed.** A `:smm`, `:ai`, or `:manual` purchase is
+  refused rather than handed a placeholder capability, so a partially built
+  feature cannot appear to work.
 
 ## Input handling conventions (for future features)
 

@@ -43,6 +43,13 @@ config :cass,
 # adapter HTTP through `Req.Test`.
 config :cass, :paystack, base_url: "https://api.paystack.co"
 
+# The secret used to derive the access code a buyer receives for a delivered
+# purchase (`Cass.Delivery`). Like the payment secret it is deliberately absent
+# here and injected per environment: a dummy in dev/test, `DELIVERY_ACCESS_SECRET`
+# in prod via `config/runtime.exs`. It is a *signing* key — it never leaves the
+# server, and nothing derived from it is reversible.
+config :cass, Cass.Delivery, access_secret: nil
+
 # The registry of payment provider adapters (`Cass.Payments.Providers`).
 # Enabling a provider here (with its adapter module) is the only step needed
 # to make it usable by `Cass.Payments`. Provider-specific secrets live under

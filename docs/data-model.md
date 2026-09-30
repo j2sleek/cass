@@ -239,6 +239,29 @@ Indexes: **unique `order_item_id`**, **unique `fulfillment_id`**, `order_id`,
 * **Revocation is a withdrawal.** The row (and its provenance) stays for support
   questions; only `status`/`revoked_at`/`revoked_reason` change.
 
+### No new tables (Milestone 8)
+
+Delivery and access add **no migration, no table, and no `Ecto.Schema`**. An
+access decision needs exactly three facts, and all of them already exist:
+
+| Fact an access decision needs | Already stored in |
+| --- | --- |
+| *Which* delivery must be exercised, and of what kind | `cass_fulfillments` (`kind`, lifecycle) |
+| *Who* holds the right, and whether it still stands | `cass_entitlements` (`user_id`, `status`, `expires_at`) |
+| *What* was bought, immutably | `cass_entitlements` snapshot (names, SKU, quantity, type, `metadata`) |
+
+A `cass_deliveries` table would therefore re-store `user_id`, `order_id`,
+`order_item_id`, and `product_type`, and would need a second lifecycle beside the
+one `cass_fulfillments` already owns — a denormalization with no new fact behind
+it. The access code is not stored either: it is an HMAC over the entitlement's
+immutable `order_item_id`, so a deterministic credential needs no row, and
+revocation is enforced on the existing `status`, not on a code that would have
+to be re-checked elsewhere.
+
+The provider-facing state that a real object store, SMM API, or AI gateway will
+need is genuinely persistent, and `Cass.Fulfillment.Fulfillment` documents where
+it belongs: a delivery-attached table, added when the first provider needs it.
+
 ### `cass_categories`
 
 #### `owner_id` (Milestone 3 Phase 3)
@@ -516,16 +539,21 @@ contexts use.
 * ~~`entitlements` — digital product access grants.~~ Implemented in Milestone 7
   as `cass_entitlements`: 1:1 with the purchased line and with the delivery that
   granted it, snapshotting the purchase.
-* `downloads` — the digital files/codes a `:digital` delivery hands over, and the
+* `downloads` — the digital files a `:digital` delivery hands over, and the
   per-download accounting that a future time-bounded `:expires_at` grant needs.
+  Milestone 8 deliberately ships **no** such table: its digital mechanism is a
+  locally derived access code, which needs no storage. This entry stays open for
+  the first milestone that adds real download infrastructure (a signed URL, a
+  provider reference, or a per-download counter).
+* A delivery-attached provider-state table — a real object key, an upstream
+  order id, a provider response, retry bookkeeping — reserved on
+  `Cass.Fulfillment.Fulfillment` for the first provider that needs it.
 * Vendor onboarding (the `vendor` profile/business columns). Roles already exist
   (`cass_user_roles`) and product ownership exists (`cass_products.owner_id`), so
   onboarding has to add neither a role system nor an ownership column.
 * **Ownership transfer** is deliberately not planned as a column change. When it
   is designed, the `on_delete: :restrict` FK is the forcing function: deleting an
   account that owns products must be refused or explicitly resolved first.
-* An account-deletion or credential-history table, if a later hardening phase
-  needs one.
 * An account-deletion or credential-history table, if a later hardening phase
   needs one.
 

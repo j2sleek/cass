@@ -56,6 +56,10 @@ defmodule CassWeb.Router do
       live "/users/settings", UserSettingsLive
       live "/orders", OrdersLive, :index
       live "/orders/:id", OrdersLive, :show
+      # Delivery & access for one purchase (Milestone 8). The route is
+      # authenticated; ownership and entitlement state are decided by
+      # `Cass.Delivery.authorize_access/2`, never here.
+      live "/purchases/:id", PurchaseLive
     end
 
     post "/orders", OrderController, :create

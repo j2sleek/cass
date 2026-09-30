@@ -313,6 +313,102 @@ Every arrow is a foreign key, so no row can exist without the one it depends on.
   hand-off, an `:ai` grant) come later, and the chain is built so each of them
   only has to claim a row and report an outcome.
 
+## Delivery and access (Milestone 8)
+
+Milestone 7 stopped at the grant. A buyer holding an active entitlement could
+prove they *had* a right but there was nothing that said how to *use* it, so
+this milestone adds the other half of the chain and keeps the two questions
+apart:
+
+    entitlement → delivery / access
+
+    "does this customer hold the right?"  →  Cass.Entitlements
+    "how is that right exercised?"        →  Cass.Delivery
+
+That separation is the point. Revocation withdraws the right (an `Entitlement`
+fact) without knowing what the right was being used for, and a delivery
+mechanism can change — a different provider, a real object store, a human
+hand-off — without touching an ownership, expiry, or purchase-history fact.
+
+* **`Cass.Delivery` is the access boundary, and it adds no schema.** No
+  migration, no table, no `Ecto.Schema`: every input an access decision needs is
+  already stored, and stored immutably. `cass_fulfillments` owns the delivery
+  obligation, its lifecycle, and `kind`; `cass_entitlements` owns the buyer's
+  identity, status, `expires_at`, and the purchase snapshot *including* the
+  vendor's delivery instructions (`metadata`, copied from
+  `ProductVariant.config` at checkout). A `cass_deliveries` table would
+  re-store `user_id`, `order_id`, `order_item_id`, and `product_type` beside a
+  second lifecycle — a denormalization with no new fact to justify it. The
+  provider-facing state a real object store or SMM API will need is documented
+  where it belongs, on `Cass.Fulfillment.Fulfillment`, as a future
+  delivery-attached table.
+* **`authorize_access/2` is the one authoritative decision.** It composes three
+  facts and grants only when all three hold: an authenticated
+  `Cass.Accounts.Scope`, an entitlement that scope owns, and an active
+  entitlement whose delivery kind has a mechanism. Ownership is *not*
+  re-decided here — it comes from `Entitlements.get_entitlement/2`, which already
+  applies the owner-or-admin rule and already returns `nil` for a foreign *and*
+  an unknown id. State is *not* re-read either: the check calls the centralized
+  `Entitlement.active?/1`, so a revoked grant and an elapsed one are both
+  refused without this context knowing what `expires_at` means. There is no
+  `user_id` argument anywhere on the path, so a request cannot supply the
+  identity it is checked against.
+* **A kind is not a mechanism.** `Cass.Fulfillment.kind` remains the single
+  taxonomy, and `Delivery.kinds/0` and `kind_for/1` delegate to it rather than
+  restating it. `mechanism_for/1` is the one extension point, and the
+  distinction keeps the milestone honest: the vocabulary covers the
+  marketplace's four product categories, while exactly one is exercisable.
+
+      :digital → :access_code  (implemented)
+      :smm     → not yet exercisable
+      :ai      → not yet exercisable
+      :manual  → not yet exercisable
+
+  The unimplemented kinds **refuse** rather than inventing a placeholder
+  capability, so a `:smm` buyer is told the purchase cannot be accessed today
+  instead of being handed a broken panel. Each future mechanism is one clause
+  here plus its representation in `Cass.Delivery.Access` — with nothing in
+  Orders, Payments, Fulfillment, or Entitlements moving, which is the property
+  this milestone exists to establish.
+* **No provider abstraction yet.** There is deliberately no
+  `Cass.Delivery.Provider` behaviour and no registry, because a registry of one
+  is speculative. `Cass.Payments.Provider` is the precedent: it was introduced
+  when the second gateway had a reason to exist.
+* **The capability is narrowed, not re-serialized.** `Cass.Delivery.Access` is a
+  plain struct built from named fields, deliberately *not* a schema and not a
+  member of the `Entitlement` struct family. An entitlement is a record and is
+  therefore complete; an access capability is a response and carries only what
+  the holder needs. Because the struct has no `metadata` field, the redaction
+  rule is structural — there is no allow-list to forget to update. The
+  `:access_code` field is excluded from `Inspect`, so an accidental
+  `IO.inspect(access)` cannot put a live credential in a log.
+* **The credential is derived, not stored.** The code is an HMAC over the
+  entitlement's immutable `order_item_id` under a server-side secret
+  (`DELIVERY_ACCESS_SECRET`, injected like the payment secret), rendered as
+  `XXXX-XXXX-XXXX-XXXX` in a Crockford-style alphabet — 80 bits, no ambiguous
+  `I`/`L`/`O`/`U`, no padding. It is deterministic (a retried request, a second
+  tab, and a re-render all show the buyer the same code), unforgeable without
+  the secret, and an HMAC output that reveals nothing about it. Derivation is
+  **private**: a public "give me the code for this entitlement" function would
+  be a second, authority-free way to mint a credential and would quietly become
+  the real access decision. It is a local stand-in for a license-key service or
+  a signed download grant, added so the boundary is exercisable end to end
+  without an external provider.
+* **Access is a pure read.** Nothing is written, so there is no read-then-write
+  window and nothing to double-insert. Idempotency is inherited from the
+  immutable purchase ids rather than re-established with an index.
+* **One route, and it is narrow.** `GET /purchases/:id` is the only web surface
+  (`CassWeb.PurchaseLive`). It resolves exactly one thing —
+  `Delivery.authorize_access(current_scope, id)` — and renders the granted
+  capability or the shared not-found state. It is `noindex`, and it is reached
+  from the buyer's own order page, which links only the lines that context
+  reports as exercisable. There is no listing and no dashboard, so there is
+  nowhere to enumerate.
+* **Refusals are indistinguishable.** Unknown, foreign, revoked, elapsed, and
+  not-yet-exercisable all produce the same `:base` error from the same
+  `refuse/0`, and the web layer renders all of them as the same page, so a
+  probe cannot learn whether an id exists, whose it was, or why it failed.
+
 ## Accounts and current scope
 
 * `Cass.Accounts` owns `cass_users`, `cass_users_tokens`, `cass_user_roles`,
@@ -407,6 +503,11 @@ controls, and [docs/data-model.md](data-model.md) for the tables.
   endpoint as `environment`.
 * Database credentials live in `config/<env>.exs` via `config/runtime.exs`
   (env vars in production). Secrets are never in the repo.
+* `DELIVERY_ACCESS_SECRET` (Milestone 8) is the server-side secret the digital
+  access code is derived under, configured the same way as the payment secret
+  and required at least 32 bytes. A missing or short value raises at the point
+  of issue rather than silently producing a weakly derived credential, so a
+  misconfigured deploy fails loudly instead of handing out guessable codes.
 
 ## Testing strategy
 

@@ -24,6 +24,7 @@ defmodule CassWeb.OrdersLive do
     |> assign(:order, nil)
     |> assign(:order_not_found, false)
     |> assign(:can_pay?, false)
+    |> assign(:accessible_order_item_ids, %{})
     |> ok()
   end
 
@@ -42,6 +43,7 @@ defmodule CassWeb.OrdersLive do
           order_not_found={@order_not_found}
           can_pay?={@can_pay?}
           admin?={Cass.Accounts.Scope.admin?(@current_scope)}
+          accessible_order_item_ids={@accessible_order_item_ids}
         />
       <% else %>
         <.order_index orders={@streams.orders} />
@@ -122,6 +124,7 @@ defmodule CassWeb.OrdersLive do
   attr :order_not_found, :boolean, required: true
   attr :can_pay?, :boolean, required: true
   attr :admin?, :boolean, required: true
+  attr :accessible_order_item_ids, :any, required: true
 
   defp order_show(assigns) do
     ~H"""
@@ -178,10 +181,19 @@ defmodule CassWeb.OrdersLive do
                     {item.variant_name}{if item.sku, do: " · #{item.sku}"}
                   </p>
                 </div>
-                <div class="flex shrink-0 items-center gap-4 text-sm">
+                <div class="flex shrink-0 flex-wrap items-center gap-4 text-sm">
                   <span class="text-zinc-500 dark:text-zinc-400">
                     {item.quantity} × {money(item.unit_price_cents, item.currency)}
                   </span>
+                  <%= if Map.has_key?(@accessible_order_item_ids, item.id) do %>
+                    <.link
+                      navigate={~p"/purchases/#{@accessible_order_item_ids[item.id]}"}
+                      id={"order-item-access-#{item.id}"}
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20"
+                    >
+                      <.icon name="hero-key" class="size-3.5" /> Access
+                    </.link>
+                  <% end %>
                   <span
                     id={"item-line-total-#{item.id}"}
                     class="font-semibold text-zinc-900 dark:text-white"
@@ -249,6 +261,7 @@ defmodule CassWeb.OrdersLive do
     socket
     |> assign(:order_not_found, false)
     |> assign(:can_pay?, false)
+    |> assign(:accessible_order_item_ids, %{})
     |> refresh_orders()
   end
 
@@ -259,14 +272,40 @@ defmodule CassWeb.OrdersLive do
         |> assign(:order_not_found, true)
         |> assign(:order, nil)
         |> assign(:can_pay?, false)
+        |> assign(:accessible_order_item_ids, %{})
 
       order ->
         socket
         |> assign(:order_not_found, false)
         |> assign(:order, order)
         |> assign(:can_pay?, can_pay?(socket.assigns.current_scope, order))
+        |> assign(
+          :accessible_order_item_ids,
+          accessible_lines(socket.assigns.current_scope, order)
+        )
         |> assign(:page_title, "#{order.number} · Orders · CASS Marketplace")
     end
+  end
+
+  # Which of this order's purchased lines can be exercised right now, and at
+  # which entitlement. `Cass.Orders` has already established that the caller owns
+  # this order, and each line is then confirmed through
+  # `Cass.Delivery.authorize_access/2` — so a line whose delivery is pending,
+  # failed, cancelled, revoked, elapsed, or not yet exercisable simply has no
+  # link, and the decision is the context's rather than the template's.
+  defp accessible_lines(scope, order) do
+    scope
+    |> Cass.Entitlements.list_for_order(order.id)
+    |> Enum.flat_map(fn entitlement ->
+      # The grant names the purchased line it belongs to; the delivery context
+      # then decides whether that right is exercisable right now. The page
+      # renders the link only when both agree, and never re-derives the state.
+      case Cass.Delivery.authorize_access(scope, entitlement.id) do
+        {:ok, _access} -> [{entitlement.order_item_id, entitlement.id}]
+        {:error, _refusal} -> []
+      end
+    end)
+    |> Map.new()
   end
 
   defp can_pay?(scope, %Cass.Orders.Order{status: :awaiting_payment, user_id: user_id}) do

@@ -19,6 +19,8 @@ defmodule Cass.CommerceFixtures do
 
   alias Cass.Accounts.Scope
   alias Cass.Catalog
+  alias Cass.Entitlements
+  alias Cass.Fulfillment
   alias Cass.Orders
   alias Cass.Repo
 
@@ -102,5 +104,61 @@ defmodule Cass.CommerceFixtures do
     {:ok, order} = Orders.create_order(buyer, lines)
     {:ok, paid} = Orders.mark_order_paid(order.id)
     Repo.preload(paid, :order_items)
+  end
+
+  @doc """
+  Returns an active entitlement for `buyer`, produced the real way: a paid
+  order, the delivery the order owed, and the grant that delivery completed.
+
+  The whole chain is driven through its own contexts — `create_for_paid_order/1`,
+  `mark_processing/1`, `mark_fulfilled/1` — so a test that starts from
+  "this buyer holds a grant" is standing on exactly the state a live purchase
+  produces, with no row fabricated and no status hand-set.
+
+  Returns `%{buyer:, order:, fulfillment:, entitlement:}`. Pass
+  `product_type: :smm`/`:ai`/`:service` to exercise a non-exercisable delivery
+  kind, or `config:` to put vendor-authored keys into the purchase metadata.
+  """
+  def granted_entitlement_fixture(buyer, category, opts \\ []) do
+    {_product, variant} =
+      published_variant_fixture(category,
+        product_type: Keyword.get(opts, :product_type, :digital),
+        config: Keyword.get(opts, :config, %{})
+      )
+
+    order = paid_order_fixture(buyer, variant, Keyword.get(opts, :quantity, 1))
+    # One line was bought, so exactly one delivery and one grant exist.
+    [fulfillment] = fulfill_order!(order)
+
+    %{
+      buyer: buyer,
+      order: order,
+      fulfillment: fulfillment,
+      entitlement: Repo.preload(fulfillment, :entitlement).entitlement
+    }
+  end
+
+  @doc """
+  Drives every line of a paid order through `:fulfilled` and returns the
+  deliveries, oldest line first.
+  """
+  def fulfill_order!(order) do
+    {:ok, fulfillments} = Fulfillment.create_for_paid_order(order)
+
+    Enum.map(fulfillments, fn fulfillment ->
+      {:ok, claimed} = Fulfillment.mark_processing(fulfillment)
+      {:ok, delivered} = Fulfillment.mark_fulfilled(claimed)
+      delivered
+    end)
+  end
+
+  @doc """
+  Revokes the grant for a fulfilled delivery through the real boundary call, the
+  way a refund or support action would.
+  """
+  def revoke_fixture(%{fulfillment: fulfillment} = context) do
+    entitlement = Repo.preload(fulfillment, :entitlement).entitlement
+    {:ok, revoked} = Entitlements.revoke_entitlement(entitlement, "refund issued")
+    Map.put(context, :entitlement, revoked)
   end
 end

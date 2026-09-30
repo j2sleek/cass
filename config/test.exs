@@ -50,3 +50,8 @@ config :phoenix,
 config :cass, :paystack,
   secret_key: "sk_test_dummy_dummy_dummy_dummy_dummy_dummy",
   req_options: [plug: {Req.Test, :paystack}]
+
+# The delivery access-signing secret for tests: a fixed dummy, so a derived
+# access code is deterministic within a run and no test needs a real key. Only
+# `Cass.DeliverySecretTest` replaces this value, and it does so serially.
+config :cass, Cass.Delivery, access_secret: "test_dummy_delivery_access_secret_not_a_real_key"
