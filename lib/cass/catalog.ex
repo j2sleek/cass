@@ -79,7 +79,7 @@ defmodule Cass.Catalog do
   import Ecto.Query, warn: false
 
   alias Cass.Accounts.Scope
-  alias Cass.Catalog.{Category, Product, ProductVariant}
+  alias Cass.Catalog.{Category, Product, ProductVariant, SearchParams}
   alias Cass.Repo
 
   @not_authorized_to_create "you are not authorized to create a product"
@@ -216,6 +216,7 @@ defmodule Cass.Catalog do
     |> where([p], p.visibility == :public)
     |> order_by([p], desc: p.published_at)
     |> Repo.all()
+    |> Repo.preload(active_variants: public_variant_query())
   end
 
   @doc "Returns the publicly discoverable products directly inside a category."
@@ -226,7 +227,238 @@ defmodule Cass.Catalog do
     |> where([p], p.visibility == :public)
     |> order_by([p], desc: p.published_at)
     |> Repo.all()
+    |> Repo.preload(active_variants: public_variant_query())
   end
+
+  @doc """
+  Returns one page of publicly discoverable products plus the total match count.
+
+  Every predicate is layered on top of `public_product_query/1`, so a search
+  can only ever return rows the catalog index already considers public:
+  `:published`, `:public` visibility, past `published_at`, in an `:active`
+  category. Visibility is never widened here — this function adds ordering and
+  narrowing only.
+
+  Returns `%{products: [...], total: integer, page: integer, per_page: integer,
+  total_pages: integer, query: ..., product_type: ..., sort: ...}`.
+  """
+  def search_public_products(%SearchParams{} = params) do
+    params = normalize_search_params(params)
+    %{query: term, product_type: product_type, sort: sort, page: page} = params
+
+    query =
+      Product
+      |> public_product_query()
+      |> where([p], p.visibility == :public)
+      |> apply_search_term(term)
+      |> apply_product_type(product_type)
+      |> apply_category_slug(params.category_slug)
+      |> join_min_active_price()
+      |> apply_search_sort(sort)
+      |> limit(^params.per_page)
+      |> offset(^((page - 1) * params.per_page))
+
+    products =
+      query
+      |> Repo.all()
+      |> Repo.preload(active_variants: public_variant_query())
+
+    total =
+      Product
+      |> public_product_query()
+      |> where([p], p.visibility == :public)
+      |> apply_search_term(term)
+      |> apply_product_type(product_type)
+      |> apply_category_slug(params.category_slug)
+      |> Repo.aggregate(:count)
+
+    %{
+      products: products,
+      total: total,
+      page: page,
+      per_page: params.per_page,
+      total_pages: max(ceil_div(total, params.per_page), 1),
+      query: term,
+      product_type: product_type,
+      category_slug: params.category_slug,
+      sort: sort
+    }
+  end
+
+  @doc """
+  Returns up to `limit` other public products related to `product`.
+
+  Relevance is "same category, or same product type", so the shelf is useful
+  even when a category only holds one listing. It never widens visibility: the
+  result is layered on `public_product_query/1` and the product itself is
+  excluded.
+  """
+  def list_related_products(%Product{} = product, limit \\ 4) do
+    limit = max(min(limit, 12), 1)
+
+    query =
+      Product
+      |> public_product_query()
+      |> where([p], p.visibility == :public)
+      |> where([p], p.id != ^product.id)
+
+    # A product with no category can only be related by type, otherwise the
+    # comparison would silently never match.
+    query =
+      if is_nil(product.category_id) do
+        where(query, [p], p.product_type == ^product.product_type)
+      else
+        where(
+          query,
+          [p],
+          p.category_id == ^product.category_id or p.product_type == ^product.product_type
+        )
+      end
+
+    query
+    |> order_by([p], desc: p.featured, desc: p.published_at, asc: p.id)
+    |> limit(^limit)
+    |> Repo.all()
+    |> Repo.preload(active_variants: public_variant_query())
+  end
+
+  @doc """
+  Returns up to `limit` featured public products, newest first.
+
+  Used for the storefront's "featured" shelf. Falls back to the newest public
+  products when nothing is flagged, so the shelf is never empty for free.
+  """
+  def list_public_featured_products(limit \\ 8) do
+    limit = max(min(limit, 24), 1)
+
+    query =
+      Product
+      |> public_product_query()
+      |> where([p], p.visibility == :public and p.featured == true)
+      |> order_by([p], desc: p.published_at)
+      |> limit(^limit)
+      |> Repo.all()
+
+    case query do
+      [] -> list_public_products() |> Enum.take(limit)
+      featured -> featured
+    end
+    |> Repo.preload(active_variants: public_variant_query())
+  end
+
+  defp ceil_div(_total, 0), do: 0
+
+  defp ceil_div(total, per_page),
+    do: div(total + per_page - 1, per_page)
+
+  # Unknown sort keys, out-of-range pages and bogus types all collapse to the
+  # documented defaults instead of raising on attacker-controlled input.
+  # A struct can still be built by hand with hostile values, so the type and
+  # range clamps are re-applied here as well as in `SearchParams.from_params/1`.
+  # The context is the trust boundary, not the caller.
+  defp normalize_search_params(%SearchParams{} = params) do
+    {min_page, max_page} = SearchParams.per_page_bounds()
+
+    %{
+      params
+      | product_type:
+          if(params.product_type in product_types(), do: params.product_type, else: nil),
+        sort: if(params.sort in SearchParams.sorts(), do: params.sort, else: "newest"),
+        page: params.page |> max(min_page) |> min(100_000),
+        per_page: params.per_page |> max(min_page) |> min(max_page),
+        query: normalize_term(params.query)
+    }
+  end
+
+  defp normalize_term(term) when is_binary(term) do
+    case String.trim(term) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, 120)
+    end
+  end
+
+  defp normalize_term(_term), do: nil
+
+  defp apply_search_term(query, nil), do: query
+
+  defp apply_search_term(query, term) do
+    pattern = "%" <> escape_like(term) <> "%"
+
+    where(
+      query,
+      [p, c],
+      ilike(p.name, ^pattern) or
+        ilike(p.short_description, ^pattern) or
+        ilike(p.description, ^pattern) or
+        ilike(c.name, ^pattern)
+    )
+  end
+
+  defp apply_product_type(query, nil), do: query
+
+  defp apply_product_type(query, product_type),
+    do: where(query, [p], p.product_type == ^product_type)
+
+  # A category slug that does not resolve to an active public category can
+  # match nothing, which is the correct answer: the slug is untrusted input and
+  # must never widen visibility, only narrow it.
+  defp apply_category_slug(query, nil), do: query
+
+  defp apply_category_slug(query, slug) do
+    case get_public_category_by_slug(slug) do
+      nil -> where(query, [p], p.category_id == -1)
+      %Category{id: id} -> where(query, [p], p.category_id == ^id)
+    end
+  end
+
+  # Sorting by price needs the cheapest active variant. This is a grouped
+  # subquery joined on the product, so a product with several variants still
+  # yields exactly one row.
+  defp join_min_active_price(query) do
+    prices =
+      from v in ProductVariant,
+        where: v.active == true,
+        group_by: v.product_id,
+        select: %{product_id: v.product_id, price_cents: min(v.price_cents)}
+
+    from p in query, left_join: price in subquery(prices), on: price.product_id == p.id
+  end
+
+  # Binding order must match `public_product_query/1` + the price join:
+  # [product, category, min_active_price]. Every sort ends with a unique
+  # tiebreaker, otherwise LIMIT/OFFSET pagination can show a row twice or skip
+  # one when two products share a sort key.
+  #
+  # Postgres defaults differ per direction (NULLS last for ASC, NULLS first for
+  # DESC), so "no priced variant" is pushed to the end explicitly with
+  # `coalesce` rather than relied upon.
+  defp apply_search_sort(query, "featured"),
+    do: order_by(query, [p, c, price], desc: p.featured, desc: p.published_at, asc: p.id)
+
+  defp apply_search_sort(query, "name_asc"),
+    do: order_by(query, [p, c, price], asc: p.name, asc: p.id)
+
+  defp apply_search_sort(query, "name_desc"),
+    do: order_by(query, [p, c, price], desc: p.name, asc: p.id)
+
+  defp apply_search_sort(query, "price_asc"),
+    do:
+      order_by(query, [p, c, price],
+        asc: coalesce(price.price_cents, 999_999_999),
+        asc: p.id
+      )
+
+  defp apply_search_sort(query, "price_desc"),
+    do:
+      order_by(query, [p, c, price],
+        desc: coalesce(price.price_cents, -1),
+        asc: p.id
+      )
+
+  defp apply_search_sort(query, _newest),
+    do: order_by(query, [p, c, price], desc: p.published_at, asc: p.id)
+
+  defp escape_like(term), do: String.replace(term, ["\\", "%", "_"], fn c -> "\\" <> c end)
 
   @doc """
   Fetches a product by slug for the public web layer. Allows `:public` and
@@ -464,6 +696,22 @@ defmodule Cass.Catalog do
   def list_active_variants(%Product{} = product) do
     list_variants_by_query(variant_query(product, [:active]))
   end
+
+  @doc """
+  Returns the cheapest active variant of a product, or `nil` when it has none.
+
+  This is what the storefront shows as "the price of this product". It is
+  derived from the same `active` filter as `list_active_variants/1`, so an
+  inactive or exhausted variant can never be what a shopper is quoted.
+  """
+  def cheapest_active_variant(%Product{active_variants: variants}) when is_list(variants) do
+    variants
+    |> Enum.reject(&is_nil(&1.price_cents))
+    |> Enum.min_by(fn variant -> {variant.price_cents, variant.id} end, fn -> nil end)
+  end
+
+  # Variants not preloaded, or a product with none.
+  def cheapest_active_variant(%Product{}), do: nil
 
   @doc """
   Creates a variant for `product` on behalf of `scope`.

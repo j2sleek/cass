@@ -1,57 +1,7 @@
-<Layouts.flash_group flash={@flash} />
+<Layouts.site_header />
 
 <div class="min-h-screen bg-white text-zinc-800 dark:bg-[#0b0b14] dark:text-zinc-200">
-  <header class="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur dark:border-white/10 dark:bg-[#0b0b14]/85">
-    <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
-      <a
-        href={~p"/"}
-        class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-        aria-label="CASS Marketplace home"
-      >
-        <Layouts.brand_mark />
-      </a>
-
-      <nav class="hidden items-center gap-1 sm:flex md:gap-2" aria-label="Primary">
-        <a
-          href="#categories"
-          class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
-        >
-          Categories
-        </a>
-        <a
-          href="#features"
-          class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
-        >
-          What&apos;s included
-        </a>
-        <a
-          href="#about"
-          class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
-        >
-          About
-        </a>
-        <a
-          href="#categories"
-          class="ml-2 inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#0b0b14]"
-        >
-          Get started
-        </a>
-        <span class="ml-1">
-          <Layouts.theme_toggle />
-        </span>
-      </nav>
-
-      <div class="flex items-center gap-2 sm:hidden">
-        <Layouts.theme_toggle />
-        <a
-          href="#categories"
-          class="inline-flex items-center gap-1.5 rounded-full bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700"
-        >
-          Get started
-        </a>
-      </div>
-    </div>
-  </header>
+  <Layouts.flash_group flash={@flash} />
 
   <main id="main" class="isolate">
     <section class="relative overflow-hidden" aria-labelledby="hero-heading">
@@ -62,10 +12,10 @@
       >
       </div>
 
-      <div class="mx-auto w-full max-w-6xl px-4 pb-20 pt-16 sm:px-6 sm:pt-24 lg:px-8">
+      <div class="mx-auto w-full max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pt-20 lg:px-8">
         <span class="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-semibold tracking-wide text-brand-700 uppercase dark:border-brand-800 dark:bg-brand-950 dark:text-brand-200">
           <span class="size-1.5 rounded-full bg-accent-500" aria-hidden="true"></span>
-          Foundation release · Milestone 1
+          Payments, credits and delivery tracking are live
         </span>
 
         <h1
@@ -79,52 +29,56 @@
         </h1>
 
         <p class="mt-6 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-          CASS unifies compliant social marketing services, downloadable digital
-          products, and AI-powered utilities under a single account, catalog, and
-          checkout — built server-side on Elixir, Phoenix LiveView, and PostgreSQL.
+          Buy templates, media packages and AI utilities with one account and one
+          checkout. Every paid order becomes a delivery you can follow, and every
+          completed delivery becomes access you can use.
         </p>
 
-        <div class="mt-9 flex flex-wrap items-center gap-3">
+        <div class="mt-9 max-w-2xl">
+          <CassWeb.Storefront.search_form id="hero-search" class="w-full sm:max-w-xl" />
+        </div>
+
+        <div class="mt-6 flex flex-wrap items-center gap-3">
           <a
             href="#categories"
             class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#0b0b14]"
           >
             Browse categories <.icon name="hero-arrow-down" class="size-4" />
           </a>
-          <a
-            href="#features"
+          <.link
+            navigate={~p"/catalog"}
             class="inline-flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:border-brand-300 hover:text-brand-700 dark:border-white/15 dark:bg-white/5 dark:text-zinc-200 dark:hover:border-brand-700 dark:hover:text-brand-300"
           >
-            What&apos;s included
-          </a>
+            Search everything
+          </.link>
         </div>
 
-        <dl class="mt-14 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
+        <dl class="mt-12 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
           <div class="rounded-xl border border-zinc-200/80 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
             <dt class="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
-              <.icon name="hero-server-stack" class="size-4 text-brand-600 dark:text-brand-400" />
-              Server-rendered
+              <.icon name="hero-credit-card" class="size-4 text-brand-600 dark:text-brand-400" />
+              Paystack checkout
             </dt>
             <dd class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              SEO-friendly pages rendered by Phoenix LiveView.
+              Payment is recorded per order line, never as one vague total.
             </dd>
           </div>
           <div class="rounded-xl border border-zinc-200/80 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
             <dt class="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
-              <.icon name="hero-cube" class="size-4 text-brand-600 dark:text-brand-400" />
-              Modular monolith
+              <.icon name="hero-truck" class="size-4 text-brand-600 dark:text-brand-400" />
+              Tracked deliveries
             </dt>
             <dd class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              One deployable Elixir app with clear domain contexts.
+              Access is granted only after a delivery is completed.
             </dd>
           </div>
           <div class="rounded-xl border border-zinc-200/80 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
             <dt class="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
-              <.icon name="hero-database" class="size-4 text-brand-600 dark:text-brand-400" />
-              PostgreSQL backed
+              <.icon name="hero-bolt" class="size-4 text-brand-600 dark:text-brand-400" />
+              AI on credits
             </dt>
             <dd class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Durable transactions and Ecto migrations.
+              Gateway calls are metered against your credit balance.
             </dd>
           </div>
         </dl>
@@ -133,85 +87,159 @@
 
     <section
       id="categories"
-      class="scroll-mt-20 border-t border-zinc-200/70 bg-zinc-50/70 py-20 dark:border-white/10 dark:bg-white/[0.02]"
+      class="scroll-mt-20 border-t border-zinc-200/70 bg-zinc-50/70 py-16 dark:border-white/10 dark:bg-white/[0.02]"
       aria-labelledby="categories-heading"
     >
       <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div class="max-w-2xl">
-          <p class="text-sm font-semibold tracking-wide text-brand-700 uppercase dark:text-brand-300">
-            Marketplace categories
-          </p>
-          <h2
-            id="categories-heading"
-            class="mt-2 text-3xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-4xl"
+        <CassWeb.Storefront.section_heading
+          id="categories-heading"
+          title="Browse categories"
+          subtitle="Start from a category, or filter the whole catalog by what you need."
+        >
+          <:action>
+            <.link
+              navigate={~p"/catalog"}
+              class="text-sm font-semibold text-brand-600 transition hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200"
+            >
+              See all products
+            </.link>
+          </:action>
+        </CassWeb.Storefront.section_heading>
+
+        <%= if @categories == [] do %>
+          <CassWeb.Storefront.empty_state
+            id="no-categories"
+            title="No categories published yet"
+            body="Categories appear here as soon as an admin activates them."
+            icon="hero-squares-2x2"
+          />
+        <% else %>
+          <ul id="home-category-grid" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <li
+              :for={category <- @categories}
+              class="group relative flex flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md motion-reduce:transform-none dark:border-white/10 dark:bg-white/5 dark:hover:border-brand-500/40"
+            >
+              <.link
+                navigate={~p"/catalog/categories/#{category.slug}"}
+                class="flex h-full flex-col focus-visible:outline-none"
+              >
+                <span class="grid size-11 place-items-center rounded-xl bg-brand-50 text-brand-700 transition-colors group-hover:bg-brand-100 dark:bg-brand-950 dark:text-brand-300 dark:group-hover:bg-brand-900">
+                  <.icon
+                    name={CassWeb.Storefront.category_icon(category.id)}
+                    class="size-5"
+                  />
+                </span>
+                <span class="mt-4 text-sm font-semibold text-zinc-900 dark:text-white">
+                  {category.name}
+                </span>
+                <span
+                  :if={category.description}
+                  class="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                >
+                  {category.description}
+                </span>
+              </.link>
+            </li>
+          </ul>
+        <% end %>
+      </div>
+    </section>
+
+    <section
+      :if={@featured_products != []}
+      class="py-16"
+      aria-labelledby="featured-heading"
+    >
+      <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <CassWeb.Storefront.section_heading
+          id="featured-heading"
+          title="Featured right now"
+          subtitle="Picked by the CASS team from what is published and in stock."
+        />
+        <ul
+          id="featured-products"
+          class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <li :for={product <- @featured_products}>
+            <CassWeb.ProductCard.product_card product={product} />
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section
+      :if={@latest_products != []}
+      class="border-t border-zinc-200/70 bg-zinc-50/70 py-16 dark:border-white/10 dark:bg-white/[0.02]"
+      aria-labelledby="latest-heading"
+    >
+      <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <CassWeb.Storefront.section_heading
+          id="latest-heading"
+          title="Latest additions"
+          subtitle="The most recently published products across every category."
+        >
+          <:action>
+            <.link
+              navigate={~p"/catalog?sort=newest"}
+              class="text-sm font-semibold text-brand-600 transition hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200"
+            >
+              Browse the catalog
+            </.link>
+          </:action>
+        </CassWeb.Storefront.section_heading>
+
+        <ul
+          id="latest-products"
+          class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <li :for={product <- @latest_products}>
+            <CassWeb.ProductCard.product_card product={product} />
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section
+      class="border-t border-zinc-200/70 py-16 dark:border-white/10"
+      aria-labelledby="types-heading"
+    >
+      <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
+        <CassWeb.Storefront.section_heading
+          id="types-heading"
+          title="What you can buy on CASS"
+          subtitle="Three kinds of listing, each with its own delivery mechanics."
+        />
+
+        <ul id="product-type-grid" class="grid grid-cols-1 gap-6 md:grid-cols-3">
+          <li
+            :for={product_type <- @product_types}
+            class="flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md motion-reduce:transform-none dark:border-white/10 dark:bg-white/5 dark:hover:border-brand-500/40"
           >
-            Browse what CASS will offer
-          </h2>
-          <p class="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">
-            Catalog pages, product listings, and checkout arrive in later milestones.
-            These categories define the roadmap.
-          </p>
-        </div>
-
-        <div class="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
-          <article class="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5">
             <span class="grid size-12 place-items-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300">
-              <.icon name="hero-shopping-bag" class="size-6" />
+              <.icon name={CassWeb.Format.product_type_icon(product_type)} class="size-6" />
             </span>
             <h3 class="mt-5 text-lg font-semibold text-zinc-900 dark:text-white">
-              Digital products
+              {CassWeb.Format.product_type_heading(product_type)}
             </h3>
             <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Templates, guides, code resources, and design assets delivered as
-              secure downloads or account entitlements.
+              {CassWeb.Format.product_type_blurb(product_type)}
             </p>
-            <div class="mt-4">
-              <span class="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                Coming in a later milestone
-              </span>
+            <div class="mt-5">
+              <.link
+                navigate={~p"/catalog?type=#{product_type}"}
+                class="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-600 transition hover:gap-2 hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200"
+              >
+                Browse listings <.icon name="hero-arrow-right" class="size-4" />
+              </.link>
             </div>
-          </article>
-
-          <article class="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5">
-            <span class="grid size-12 place-items-center rounded-xl bg-accent-50 text-accent-700 dark:bg-accent-950 dark:text-accent-300">
-              <.icon name="hero-megaphone" class="size-6" />
-            </span>
-            <h3 class="mt-5 text-lg font-semibold text-zinc-900 dark:text-white">
-              Social marketing services
-            </h3>
-            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Transparent content packages, campaign planning, analytics, and
-              reporting — never fake engagement or deceptive automation.
-            </p>
-            <div class="mt-4">
-              <span class="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                Coming in a later milestone
-              </span>
-            </div>
-          </article>
-
-          <article class="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5">
-            <span class="grid size-12 place-items-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300">
-              <.icon name="hero-sparkles" class="size-6" />
-            </span>
-            <h3 class="mt-5 text-lg font-semibold text-zinc-900 dark:text-white">AI tools</h3>
-            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Quota-controlled utilities such as caption generation, SEO
-              assistance, and product copy — routed through the Nexus AI Gateway.
-            </p>
-            <div class="mt-4">
-              <span class="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                Coming in a later milestone
-              </span>
-            </div>
-          </article>
-        </div>
+          </li>
+        </ul>
 
         <div class="mt-6 rounded-2xl border border-dashed border-zinc-300 p-7 dark:border-white/15">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-start gap-4">
               <span class="grid size-12 shrink-0 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
-                <.icon name="hero-truck" class="size-6" />
+                <.icon name="hero-building-storefront" class="size-6" />
               </span>
               <div>
                 <h3 class="text-lg font-semibold text-zinc-900 dark:text-white">
@@ -231,157 +259,43 @@
       </div>
     </section>
 
-    <section id="features" class="scroll-mt-20 py-20" aria-labelledby="features-heading">
+    <section
+      class="border-t border-zinc-200/70 py-16 dark:border-white/10"
+      aria-labelledby="how-heading"
+    >
       <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-2">
-          <div>
-            <p class="text-sm font-semibold tracking-wide text-brand-700 uppercase dark:text-brand-300">
-              Foundation first
-            </p>
-            <h2
-              id="features-heading"
-              class="mt-2 text-3xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-4xl"
-            >
-              What&apos;s included today
-            </h2>
-            <p class="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">
-              Milestone 1 establishes a clean, testable foundation. Commerce,
-              payments, and AI capabilities are deliberately deferred until the
-              core product surfaces are proven.
-            </p>
-          </div>
+        <CassWeb.Storefront.section_heading
+          id="how-heading"
+          title="How an order becomes access"
+          subtitle="The same four steps for every listing, whatever kind it is."
+        />
 
-          <ul class="space-y-4">
-            <li class="flex items-start gap-4 rounded-xl border border-zinc-200 bg-white/70 p-5 dark:border-white/10 dark:bg-white/5">
-              <.icon
-                name="hero-check-circle"
-                class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
-              />
-              <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Public storefront shell</p>
-                <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Semantic, responsive, server-rendered landing page with SEO metadata and structured data.
-                </p>
-              </div>
-            </li>
-            <li class="flex items-start gap-4 rounded-xl border border-zinc-200 bg-white/70 p-5 dark:border-white/10 dark:bg-white/5">
-              <.icon
-                name="hero-check-circle"
-                class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
-              />
-              <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Health endpoint</p>
-                <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  <code class="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-white/10">GET /api/v1/health</code>
-                  reports application and database status.
-                </p>
-              </div>
-            </li>
-            <li class="flex items-start gap-4 rounded-xl border border-zinc-200 bg-white/70 p-5 dark:border-white/10 dark:bg-white/5">
-              <.icon
-                name="hero-check-circle"
-                class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
-              />
-              <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Continuous checks</p>
-                <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Automated formatting, compilation, and test checks run on every push via GitHub Actions.
-                </p>
-              </div>
-            </li>
-            <li class="flex items-start gap-4 rounded-xl border border-zinc-200 bg-white/70 p-5 dark:border-white/10 dark:bg-white/5">
-              <.icon
-                name="hero-check-circle"
-                class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
-              />
-              <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Documented roadmap</p>
-                <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Architecture, API contract, data model, security, and deployment plans under <code class="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-white/10">docs/</code>.
-                </p>
-              </div>
-            </li>
-          </ul>
-        </div>
+        <ol class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <li
+            :for={
+              {step, title, body} <- [
+                {"01", "Check out",
+                 "Paystack confirms the payment and the order is split into one delivery per line item."},
+                {"02", "Delivery queued",
+                 "Fulfilment runs through a durable job queue, so a busy queue never loses an order."},
+                {"03", "Delivery completes",
+                 "Each delivery transitions from pending to processing to completed, with every step recorded."},
+                {"04", "Access granted",
+                 "Only a completed delivery unlocks the product, and access is scoped to your account."}
+              ]
+            }
+            class="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/5"
+          >
+            <span class="text-xs font-bold tracking-widest text-brand-600 dark:text-brand-300">
+              {step}
+            </span>
+            <h3 class="mt-3 text-base font-semibold text-zinc-900 dark:text-white">{title}</h3>
+            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{body}</p>
+          </li>
+        </ol>
       </div>
     </section>
   </main>
 
-  <footer
-    id="about"
-    class="scroll-mt-20 border-t border-zinc-200/70 bg-zinc-50/70 dark:border-white/10 dark:bg-white/[0.02]"
-    aria-labelledby="footer-heading"
-  >
-    <div class="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 gap-12 lg:grid-cols-12">
-        <div class="lg:col-span-5">
-          <Layouts.brand_mark />
-          <p class="mt-5 max-w-sm text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            A unified marketplace for digital products, compliant social marketing
-            services, and AI-powered tools — built with Elixir, Phoenix LiveView,
-            and PostgreSQL.
-          </p>
-          <p class="mt-4 max-w-sm text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Checkout and Paystack payments are live: a paid order is tracked line by
-            line as a delivery, and completing a delivery records your access. Delivery
-            automation and AI features are still to come.
-          </p>
-        </div>
-
-        <nav class="lg:col-span-3" aria-label="Marketplace">
-          <h3 id="footer-heading" class="sr-only">Footer</h3>
-          <p class="text-sm font-semibold text-zinc-900 dark:text-white">Marketplace</p>
-          <ul class="mt-4 space-y-3 text-sm">
-            <li class="text-zinc-500 dark:text-zinc-400">
-              Digital products
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
-            </li>
-            <li class="text-zinc-500 dark:text-zinc-400">
-              Marketing services
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
-            </li>
-            <li class="text-zinc-500 dark:text-zinc-400">
-              AI tools <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
-            </li>
-            <li class="text-zinc-500 dark:text-zinc-400">
-              Physical products
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(later)</span>
-            </li>
-          </ul>
-        </nav>
-
-        <nav class="lg:col-span-2" aria-label="Company">
-          <p class="text-sm font-semibold text-zinc-900 dark:text-white">Company</p>
-          <ul class="mt-4 space-y-3 text-sm">
-            <li class="text-zinc-500 dark:text-zinc-400">About</li>
-            <li class="text-zinc-500 dark:text-zinc-400">Contact</li>
-            <li class="text-zinc-500 dark:text-zinc-400">Privacy</li>
-          </ul>
-        </nav>
-
-        <nav class="lg:col-span-2" aria-label="Developers">
-          <p class="text-sm font-semibold text-zinc-900 dark:text-white">Developers</p>
-          <ul class="mt-4 space-y-3 text-sm">
-            <li>
-              <a
-                href={~p"/api/v1/health"}
-                class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
-              >
-                Health endpoint
-              </a>
-            </li>
-            <li class="text-zinc-500 dark:text-zinc-400">
-              API reference
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
-            </li>
-          </ul>
-        </nav>
-      </div>
-
-      <div class="mt-12 flex flex-col items-start justify-between gap-3 border-t border-zinc-200 pt-8 text-xs text-zinc-500 dark:border-white/10 dark:text-zinc-400 sm:flex-row sm:items-center">
-        <p>© 2026 CASS Marketplace</p>
-        <p>Built with Phoenix on Elixir/OTP.</p>
-      </div>
-    </div>
-  </footer>
+  <Layouts.site_footer categories={@categories} />
 </div>

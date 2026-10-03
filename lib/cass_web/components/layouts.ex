@@ -47,6 +47,258 @@ defmodule CassWeb.Layouts do
   end
 
   @doc """
+  The storefront site header.
+
+  Shared by `app/1` and by the dead-rendered landing page, so the primary
+  navigation, the search entry point and the account actions have exactly one
+  definition. `current_scope` may be `nil`, which is what a guest — and what
+  the controller-rendered home page — has.
+  """
+  attr :current_scope, :map, default: nil
+
+  def site_header(assigns) do
+    ~H"""
+    <header class="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur dark:border-white/10 dark:bg-[#0b0b14]/85">
+      <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <a
+          href={~p"/"}
+          class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          aria-label="CASS Marketplace home"
+        >
+          <Layouts.brand_mark />
+        </a>
+        <nav class="flex items-center gap-1.5 sm:gap-2" aria-label="Primary">
+          <.link
+            navigate={~p"/catalog"}
+            id="nav-catalog"
+            class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+          >
+            Catalog
+          </.link>
+
+          <CassWeb.Storefront.search_form
+            id="header-search"
+            class="hidden w-52 lg:block"
+            placeholder="Search the catalog"
+          />
+
+          <%= if Scope.authenticated?(@current_scope) do %>
+            <%!-- One place decides who sees the management link, and it is the
+                same predicate the Catalog context authorizes creation with,
+                so the nav can never advertise an area the context would
+                refuse. --%>
+            <.link
+              :if={Cass.Catalog.can_create_owned_product?(@current_scope)}
+              navigate={~p"/manage/products"}
+              id="nav-manage-products"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+            >
+              Manage products
+            </.link>
+
+            <.link
+              navigate={~p"/users/settings"}
+              id="nav-settings"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+            >
+              Settings
+            </.link>
+
+            <%!-- `method="delete"` keeps this a real browser form: Phoenix
+                renders it as POST + a hidden `_method=delete`, which
+                Plug.MethodOverride turns into the DELETE the router
+                declares, and a `_csrf_token` comes along with it. --%>
+            <.form
+              for={to_form(%{}, as: "user")}
+              id="log-out-nav-form"
+              action={~p"/users/log-out"}
+              method="delete"
+            >
+              <button
+                id="nav-log-out"
+                type="submit"
+                class="rounded-lg px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-200 dark:hover:bg-white/5 dark:hover:text-white"
+              >
+                Log out
+              </button>
+            </.form>
+          <% else %>
+            <.link
+              navigate={~p"/users/log-in"}
+              id="nav-log-in"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+            >
+              Log in
+            </.link>
+            <.link
+              navigate={~p"/users/register"}
+              id="nav-register"
+              class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              Create account
+            </.link>
+          <% end %>
+
+          <Layouts.theme_toggle />
+        </nav>
+      </div>
+    </header>
+    """
+  end
+
+  @doc """
+  The storefront site footer.
+
+  Rendered by `app/1` and by the controller-rendered landing page so the legal
+  line, the account links and the catalog links have a single definition.
+  """
+  attr :current_scope, :map, default: nil
+  attr :categories, :list, default: []
+
+  def site_footer(assigns) do
+    ~H"""
+    <footer
+      id="about"
+      class="scroll-mt-20 border-t border-zinc-200/70 bg-zinc-50/70 dark:border-white/10 dark:bg-white/[0.02]"
+      aria-labelledby="footer-heading"
+    >
+      <div class="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+        <div class="grid grid-cols-1 gap-12 lg:grid-cols-12">
+          <div class="lg:col-span-5">
+            <Layouts.brand_mark />
+            <p class="mt-5 max-w-sm text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              A unified marketplace for digital products, compliant social marketing
+              services, and AI-powered tools — built with Elixir, Phoenix LiveView,
+              and PostgreSQL.
+            </p>
+            <p class="mt-4 max-w-sm text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              Checkout and Paystack payments are live: a paid order is tracked line by
+              line as a delivery, and completing a delivery records your access.
+            </p>
+          </div>
+
+          <nav class="lg:col-span-3" aria-label="Marketplace">
+            <h3 id="footer-heading" class="sr-only">Footer</h3>
+            <p class="text-sm font-semibold text-zinc-900 dark:text-white">Marketplace</p>
+            <ul class="mt-4 space-y-3 text-sm">
+              <li>
+                <.link
+                  navigate={~p"/catalog"}
+                  class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                >
+                  Browse the catalog
+                </.link>
+              </li>
+              <li>
+                <.link
+                  navigate={~p"/catalog?type=digital"}
+                  class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                >
+                  Digital products
+                </.link>
+              </li>
+              <li>
+                <.link
+                  navigate={~p"/catalog?type=smm"}
+                  class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                >
+                  Social marketing services
+                </.link>
+              </li>
+              <li>
+                <.link
+                  navigate={~p"/catalog?type=ai"}
+                  class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                >
+                  AI tools
+                </.link>
+              </li>
+              <%= for category <- Enum.take(@categories, 6) do %>
+                <li>
+                  <.link
+                    navigate={~p"/catalog/categories/#{category.slug}"}
+                    class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                  >
+                    {category.name}
+                  </.link>
+                </li>
+              <% end %>
+            </ul>
+          </nav>
+
+          <nav class="lg:col-span-2" aria-label="Account">
+            <p class="text-sm font-semibold text-zinc-900 dark:text-white">Account</p>
+            <ul class="mt-4 space-y-3 text-sm">
+              <%= if Scope.authenticated?(@current_scope) do %>
+                <li>
+                  <.link
+                    navigate={~p"/users/settings"}
+                    class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                  >
+                    Settings
+                  </.link>
+                </li>
+                <li>
+                  <.link
+                    navigate={~p"/orders"}
+                    class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                  >
+                    Orders
+                  </.link>
+                </li>
+              <% else %>
+                <li>
+                  <.link
+                    navigate={~p"/users/log-in"}
+                    class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                  >
+                    Sign in
+                  </.link>
+                </li>
+                <li>
+                  <.link
+                    navigate={~p"/users/register"}
+                    class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                  >
+                    Create an account
+                  </.link>
+                </li>
+              <% end %>
+              <li class="text-zinc-500 dark:text-zinc-400">
+                Privacy <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
+              </li>
+            </ul>
+          </nav>
+
+          <nav class="lg:col-span-2" aria-label="Developers">
+            <p class="text-sm font-semibold text-zinc-900 dark:text-white">Developers</p>
+            <ul class="mt-4 space-y-3 text-sm">
+              <li>
+                <a
+                  href={~p"/api/v1/health"}
+                  class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                >
+                  Health endpoint
+                </a>
+              </li>
+              <li class="text-zinc-500 dark:text-zinc-400">
+                API reference
+                <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
+              </li>
+            </ul>
+          </nav>
+        </div>
+
+        <div class="mt-12 flex flex-col items-start justify-between gap-3 border-t border-zinc-200 pt-8 text-xs text-zinc-500 dark:border-white/10 dark:text-zinc-400 sm:flex-row sm:items-center">
+          <p>© 2026 CASS Marketplace</p>
+          <p>Built with Phoenix on Elixir/OTP.</p>
+        </div>
+      </div>
+    </footer>
+    """
+  end
+
+  @doc """
   Renders your app layout.
 
   This function is typically invoked from every LiveView template,
@@ -70,90 +322,15 @@ defmodule CassWeb.Layouts do
   def app(assigns) do
     ~H"""
     <div class="min-h-screen bg-white text-zinc-800 dark:bg-[#0b0b14] dark:text-zinc-200">
-      <header class="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur dark:border-white/10 dark:bg-[#0b0b14]/85">
-        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <a
-            href={~p"/"}
-            class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-            aria-label="CASS Marketplace home"
-          >
-            <Layouts.brand_mark />
-          </a>
-          <nav class="flex items-center gap-1.5 sm:gap-2" aria-label="Primary">
-            <a
-              href="#categories"
-              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
-            >
-              Categories
-            </a>
-
-            <%= if Scope.authenticated?(@current_scope) do %>
-              <%!-- One place decides who sees the management link, and it is the
-                    same predicate the Catalog context authorizes creation with,
-                    so the nav can never advertise an area the context would
-                    refuse. --%>
-              <.link
-                :if={Cass.Catalog.can_create_owned_product?(@current_scope)}
-                navigate={~p"/manage/products"}
-                id="nav-manage-products"
-                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
-              >
-                Manage products
-              </.link>
-
-              <.link
-                navigate={~p"/users/settings"}
-                id="nav-settings"
-                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
-              >
-                Settings
-              </.link>
-
-              <%!-- `method="delete"` keeps this a real browser form: Phoenix
-                    renders it as POST + a hidden `_method=delete`, which
-                    Plug.MethodOverride turns into the DELETE the router
-                    declares, and a `_csrf_token` comes along with it. --%>
-              <.form
-                for={to_form(%{}, as: "user")}
-                id="log-out-nav-form"
-                action={~p"/users/log-out"}
-                method="delete"
-              >
-                <button
-                  id="nav-log-out"
-                  type="submit"
-                  class="rounded-lg px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-200 dark:hover:bg-white/5 dark:hover:text-white"
-                >
-                  Log out
-                </button>
-              </.form>
-            <% else %>
-              <.link
-                navigate={~p"/users/log-in"}
-                id="nav-log-in"
-                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
-              >
-                Log in
-              </.link>
-              <.link
-                navigate={~p"/users/register"}
-                id="nav-register"
-                class="rounded-lg bg-zinc-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
-              >
-                Create account
-              </.link>
-            <% end %>
-
-            <Layouts.theme_toggle />
-          </nav>
-        </div>
-      </header>
+      <Layouts.site_header current_scope={@current_scope} />
 
       <main class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
         {render_slot(@inner_block)}
       </main>
 
       <Layouts.flash_group flash={@flash} />
+
+      <Layouts.site_footer current_scope={@current_scope} />
     </div>
     """
   end
