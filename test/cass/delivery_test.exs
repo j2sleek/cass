@@ -54,13 +54,16 @@ defmodule Cass.DeliveryTest do
       assert Delivery.kind_for(:service) == :manual
     end
 
-    test "a kind is not a mechanism: only digital is exercisable today" do
+    test "a kind is not a mechanism: only resolved kinds are handable" do
       assert Delivery.mechanism_for(:digital) == :access_code
 
-      # Resolved, and therefore known, but not yet handable. They refuse rather
-      # than inventing a placeholder capability.
+      # M11 resolved AI: an AI purchase is handed to the Nexus gateway, so the
+      # buyer is given a mechanism rather than a refusal.
+      assert Delivery.mechanism_for(:ai) == :ai_gateway
+
+      # Still unresolved, and therefore still refused rather than given a
+      # placeholder capability.
       assert Delivery.mechanism_for(:smm) == nil
-      assert Delivery.mechanism_for(:ai) == nil
       assert Delivery.mechanism_for(:manual) == nil
       assert Delivery.mechanism_for(:nonsense) == nil
     end
@@ -187,7 +190,9 @@ defmodule Cass.DeliveryTest do
     end
 
     test "a delivery kind with no mechanism yet", %{category: category, buyer: buyer} do
-      for product_type <- [:smm, :ai, :service] do
+      # `:ai` is deliberately absent: M11 resolved it to `:ai_gateway`, so an AI
+      # purchase is handable now and is covered by its own tests above.
+      for product_type <- [:smm, :service] do
         granted = granted_entitlement_fixture(buyer, category, product_type: product_type)
 
         assert {:error, changeset} =

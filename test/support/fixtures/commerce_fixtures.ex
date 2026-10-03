@@ -161,4 +161,21 @@ defmodule Cass.CommerceFixtures do
     {:ok, revoked} = Entitlements.revoke_entitlement(entitlement, "refund issued")
     Map.put(context, :entitlement, revoked)
   end
+
+  @doc """
+  Moves a grant's `expires_at` into the past and returns the elapsed entitlement.
+
+  Nothing in this milestone writes the `:expired` status yet, so a test that
+  needs "the buyer held this, but the window closed" gets there by moving the
+  clock on the row. The status stays `:active` on purpose: that is exactly the
+  state `active?/1` is required to reject, so leaving it active tests the
+  elapsed check rather than a status check.
+  """
+  def expire_entitlement_fixture(entitlement) do
+    elapsed = DateTime.utc_now() |> DateTime.add(-1, :minute) |> DateTime.truncate(:second)
+
+    entitlement
+    |> Ecto.Changeset.change(expires_at: elapsed)
+    |> Repo.update!()
+  end
 end

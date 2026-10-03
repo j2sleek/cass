@@ -55,3 +55,22 @@ config :cass, :paystack,
 # access code is deterministic within a run and no test needs a real key. Only
 # `Cass.DeliverySecretTest` replaces this value, and it does so serially.
 config :cass, Cass.Delivery, access_secret: "test_dummy_delivery_access_secret_not_a_real_key"
+
+# The AI gateway adapter for the test environment: a dummy key (never a real
+# one) and `:req_options` that route every adapter HTTP request through
+# `Req.Test`, so tests stub responses with `Req.Test.stub(:nexus_ai, ...)` and
+# nothing ever leaves the test process. The registry entry below is what makes
+# `Cass.Ai.available?/0` true, so the buyer's run form is exercisable here.
+config :cass, :nexus_ai,
+  api_key: "nx_test_dummy_dummy_dummy_dummy_dummy",
+  base_url: "http://nexus.test",
+  model: "default",
+  req_options: [plug: {Req.Test, :nexus_ai}]
+
+config :cass, Cass.Ai,
+  gateways: [
+    nexus: [module: Cass.Ai.Gateways.Nexus, enabled: true]
+  ],
+  # A deliberately small window so the rate-limit test is fast and stays
+  # predictable rather than depending on wall-clock timing.
+  rate_limit: [max_runs: 3, window_seconds: 60]

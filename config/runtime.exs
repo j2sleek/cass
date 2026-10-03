@@ -144,4 +144,22 @@ if config_env() == :prod do
   #     config :swoosh, :api_client, Swoosh.ApiClient.Req
   #
   # See https://swoosh.hexdocs.pm/Swoosh.html#module-installation for details.
+
+  # AI gateway credentials.
+  #
+  # Set to `nil` rather than omitted when the variable is absent, so "unset" and
+  # "blank" are the same answer to `Cass.Ai.Gateways.Nexus.configured?/0`. An
+  # unconfigured gateway disables the buyer's run button instead of letting every
+  # submission round-trip to a 401 and a refund.
+  config :cass, :nexus_ai,
+    api_key: System.get_env("NEXUS_AI_API_KEY"),
+    base_url: System.get_env("NEXUS_AI_BASE_URL") || "http://localhost:8000",
+    model: System.get_env("NEXUS_AI_MODEL") || "default"
+
+  config :cass, Cass.Ai,
+    gateways: [nexus: [module: Cass.Ai.Gateways.Nexus, enabled: true]],
+    rate_limit: [
+      max_runs: String.to_integer(System.get_env("NEXUS_AI_MAX_RUNS") || "10"),
+      window_seconds: String.to_integer(System.get_env("NEXUS_AI_RATE_WINDOW") || "60")
+    ]
 end

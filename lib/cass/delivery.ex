@@ -94,17 +94,17 @@ defmodule Cass.Delivery do
       ai      → entitlement/credits issued through the AI gateway
       manual  → fulfillment performed by a human
 
-  ## Mechanisms: the contract is established, one is implemented
+  ## Mechanisms: the contract is established, two are implemented
 
   A kind answers *what kind of delivery this is*; a **mechanism** answers *what
   this context can actually hand over right now*. `mechanism_for/1` is the
-  single extension point, and the distinction is what keeps this milestone
-  honest — the vocabulary already covers the marketplace's four product
-  categories, while exactly one of them is exercisable:
+  single extension point, and the distinction is what keeps this honest — the
+  vocabulary covers the marketplace's four product categories, while two of them
+  are exercisable:
 
       :digital → :access_code  (implemented)
+      :ai      → :ai_gateway   (implemented)
       :smm     → not yet exercisable
-      :ai      → not yet exercisable
       :manual  → not yet exercisable
 
   The unimplemented kinds refuse access rather than inventing a placeholder
@@ -113,14 +113,39 @@ defmodule Cass.Delivery do
   no change to Orders, Payments, Fulfillment, or Entitlements, which is the
   property this milestone exists to establish.
 
-  ## No provider abstraction yet
+  ## Two mechanisms, two shapes of access
+
+  `:access_code` and `:ai_gateway` differ in *what* the buyer receives, and that
+  difference is the reason `Access` is a struct rather than a flag:
+
+    * a code is a **credential** — a stable string the buyer presents elsewhere,
+    so `Access.credential?/1` is true and the value is on the struct;
+    * credits are a **balance** — a number that moves every time the buyer runs
+    something, so it is not part of the capability at all. `Access` carries
+    `credits_remaining: nil` for AI and the buyer reads the live balance from
+    `Cass.Ai.balance/2`, which is the only place a spend can be observed.
+
+  Snapshotting a balance into an access response would be wrong the moment two
+  requests overlapped, so the two facts stay separate: the struct answers "what
+  kind of right is this", the context answers "what is left of it".
+
+  ## The AI mechanism is metered, not credentialed
+
+  No `:ai` capability carries an access code, and none ever will: there is
+  nothing stable to derive. Each run costs a credit, the credit is spent through
+  `Cass.Ai.complete/3` behind an authorization and rate-limit check, and the
+  gateway's credentials stay on the server. That is why the AI mechanism arrives
+  with a `Cass.Ai.Gateway` behaviour and registry (`mechanism_for/1` is where the
+  second mechanism landed; the behaviour arrived with it, on the same precedent
+  as `Cass.Payments.Provider`).
+
+  ## No provider abstraction for delivery
 
   There is deliberately no `Cass.Delivery.Provider` behaviour and no provider
-  registry, because exactly one mechanism is implemented and a registry of one
-  is speculative scaffolding. `Cass.Payments.Provider` is the precedent for when
-  that stops being true: it is justified by two adapters and a configuration
-  surface. `mechanism_for/1` is where the second mechanism lands; the behaviour
-  arrives with it.
+  registry: delivery *mechanisms* are not provider-facing. The AI gateway has
+  its own boundary in `Cass.Ai`, because what is being abstracted there is an
+  external HTTP service with credentials, not a way of exercising an
+  entitlement.
 
   ## Redaction
 
@@ -180,19 +205,26 @@ defmodule Cass.Delivery do
 
   This is the extension point. Adding a second mechanism means adding a clause
   here and the matching representation in `Cass.Delivery.Access` — nothing in
-  Orders, Payments, Fulfillment, or Entitlements moves.
+  Orders, Payments, Fulfillment, or Entitlements moves. Two mechanisms now exist:
+
+      :digital → :access_code   (a credential the buyer presents)
+      :ai      → :ai_gateway    (credits the buyer spends, no credential)
 
   ## Examples
 
       iex> Cass.Delivery.mechanism_for(:digital)
       :access_code
 
+      iex> Cass.Delivery.mechanism_for(:ai)
+      :ai_gateway
+
       iex> Cass.Delivery.mechanism_for(:smm)
       nil
 
   """
   def mechanism_for(:digital), do: :access_code
-  def mechanism_for(kind) when kind in [:smm, :ai, :manual], do: nil
+  def mechanism_for(:ai), do: :ai_gateway
+  def mechanism_for(kind) when kind in [:smm, :manual], do: nil
   def mechanism_for(_kind), do: nil
 
   @doc """

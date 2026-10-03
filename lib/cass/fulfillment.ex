@@ -85,8 +85,10 @@ defmodule Cass.Fulfillment do
   import Ecto.Query, warn: false
 
   alias Cass.Accounts.Scope
+  alias Cass.Ai
   alias Cass.Catalog
   alias Cass.Catalog.Product
+  alias Cass.Delivery
   alias Cass.Entitlements
   alias Cass.Fulfillment.Fulfillment
   alias Cass.Orders
@@ -119,6 +121,44 @@ defmodule Cass.Fulfillment do
 
   @doc "Returns true when `from → to` is an allowed transition."
   defdelegate transition_allowed?(from, to), to: Fulfillment
+
+  @doc """
+  Returns the delivery kinds this application can hand over automatically.
+
+  A delivery is only automated when `Cass.Delivery.mechanism_for/1` reports a
+  mechanism for its kind — the same function that decides whether a buyer can
+  ever exercise a grant. `:digital` and `:ai` both qualify today; `:smm` and
+  `:manual` (a `:service` purchase) do not, and are therefore left `:pending`
+  for a human until their integration exists.
+
+  This is the eligibility authority for `Cass.Fulfillment.Worker`: a job for a
+  kind outside this list is refused rather than "delivered" by a no-op, so a
+  manual purchase can never be silently marked complete by automation.
+  """
+  def automatable_kinds do
+    for kind <- Fulfillment.kinds(), Delivery.mechanism_for(kind) != nil, do: kind
+  end
+
+  @doc """
+  Returns true when `kind` may be delivered automatically by this application.
+
+  ## Examples
+
+      iex> Cass.Fulfillment.automatable?(:digital)
+      true
+
+      iex> Cass.Fulfillment.automatable?(:ai)
+      true
+
+      iex> Cass.Fulfillment.automatable?(:smm)
+      false
+
+      iex> Cass.Fulfillment.automatable?(:manual)
+      false
+  """
+  def automatable?(kind) do
+    kind in automatable_kinds()
+  end
 
   @doc """
   Returns the fulfillment kind that delivers a product, either from a
@@ -192,13 +232,24 @@ defmodule Cass.Fulfillment do
 
   Idempotent, and the only way out of `:pending` (and back out of a `:failed`
   attempt, for a retry).
-  """
-  def mark_processing(%Fulfillment{id: id, status: :processing} = fulfillment)
-      when is_integer(id),
-      do: {:ok, fulfillment}
 
-  def mark_processing(%Fulfillment{status: status} = fulfillment) do
-    transition(fulfillment, status, :processing, %{})
+  Decided by the database like every other transition, so a caller holding a
+  struct that has since moved on cannot push it back into `:processing`: a
+  delivery that is already `:fulfilled` or `:cancelled` is refused, not
+  reopened.
+  """
+  def mark_processing(%Fulfillment{id: id} = fulfillment) when is_integer(id) do
+    case Repo.get(Fulfillment, id) do
+      %Fulfillment{status: :processing} = current ->
+        {:ok, current}
+
+      _not_claimed_yet ->
+        resolve_race(
+          guarded_transition(fulfillment, :processing, [:pending, :failed], %{}),
+          id,
+          :processing
+        )
+    end
   end
 
   def mark_processing(_fulfillment), do: refuse(@invalid_transition)
@@ -215,39 +266,68 @@ defmodule Cass.Fulfillment do
     * a retry or a concurrent duplicate grants nothing extra — the unique index
       on `cass_entitlements.order_item_id` returns the existing grant.
 
+  For an **`:ai`** delivery a third write happens in that same transaction: the
+  credit pool the grant implies (`Cass.Ai.issue_credits/1`). It is in the
+  transaction rather than beside it precisely so the two cannot diverge — an
+  entitlement a buyer can see but cannot spend (or a pool with no entitlement to
+  authorize it) would be a state no other context can repair, because nothing
+  else re-runs a completed delivery. Non-AI deliveries are unaffected; they
+  grant no balance, and the *absence* of one is what "not metered" means.
+
   Idempotent: a delivery that is already `:fulfilled` is returned unchanged
   instead of being re-delivered or re-granted. Refuses a `:pending` delivery (a
   delivery is claimed before it is reported complete) and every terminal or
   unreachable state.
+
+  The `:processing` requirement is a `WHERE` clause, not a check on the struct
+  passed in: an in-flight job that has been cancelled underneath it is refused
+  here instead of resurrecting a terminal delivery and granting it a second time.
   """
-  def mark_fulfilled(%Fulfillment{id: id, status: :fulfilled} = fulfillment)
-      when is_integer(id),
-      do: {:ok, fulfillment}
-
-  def mark_fulfilled(%Fulfillment{status: :processing} = fulfillment) do
+  def mark_fulfilled(%Fulfillment{id: id} = fulfillment) when is_integer(id) do
     Repo.transact(fn ->
-      fulfillment = Repo.preload(fulfillment, :order_item)
-
-      with {:ok, fulfillment} <-
-             transition(fulfillment, :processing, :fulfilled, %{delivered_at: utc_now()}),
-           {:ok, _entitlement} <-
-             Entitlements.grant_for_fulfillment(fulfillment, fulfillment.order_item) do
-        {:ok, fulfillment}
+      with {:ok, _} <-
+             guarded_transition(fulfillment, :fulfilled, [:processing], %{
+               delivered_at: utc_now()
+             }),
+           {:ok, fulfilled} <- reload_with_order_item(id) do
+        with {:ok, entitlement} <-
+               Entitlements.grant_for_fulfillment(fulfilled, fulfilled.order_item),
+             {:ok, _balance} <- Ai.issue_credits(entitlement) do
+          {:ok, fulfilled}
+        end
+      else
+        {:error, _} = refusal -> resolve_race(refusal, id, :fulfilled)
       end
     end)
   end
 
   def mark_fulfilled(%Fulfillment{}), do: refuse(@invalid_transition)
 
+  # A guarded transition can lose a race with a concurrent worker that already
+  # reached the same status. That is a success, not a refusal: the caller asked
+  # for the delivery to *be* in `to`, and it is.
+  defp resolve_race({:ok, _} = ok, _id, _to), do: ok
+
+  defp resolve_race({:error, _} = refusal, id, to) do
+    case Repo.get(Fulfillment, id) do
+      %Fulfillment{status: ^to} = current -> {:ok, current}
+      _moved_somewhere_else -> refusal
+    end
+  end
+
   @doc """
   Records that a delivery attempt failed, with a reason.
 
   A failed attempt is not terminal: `mark_processing/1` can claim it again for a
   retry. No entitlement is granted, and the purchase stays owed.
+
+  A late failure from a job whose delivery already finished is refused — see
+  `guarded_transition/4`.
   """
-  def mark_failed(%Fulfillment{status: status} = fulfillment, reason)
-      when status in [:pending, :processing] and is_binary(reason) do
-    transition(fulfillment, status, :failed, %{failure_reason: String.slice(reason, 0, 500)})
+  def mark_failed(%Fulfillment{} = fulfillment, reason) when is_binary(reason) do
+    guarded_transition(fulfillment, :failed, [:pending, :processing], %{
+      failure_reason: String.slice(reason, 0, 500)
+    })
   end
 
   def mark_failed(%Fulfillment{}, _reason), do: refuse(@invalid_transition)
@@ -260,12 +340,9 @@ defmodule Cass.Fulfillment do
   already completed (`:fulfilled`) is terminal too and cannot be cancelled, which
   is what keeps a granted entitlement from being orphaned by a later cancel.
   """
-  def mark_cancelled(%Fulfillment{status: status} = fulfillment)
-      when status in [:pending, :processing, :failed] do
-    transition(fulfillment, status, :cancelled, %{})
+  def mark_cancelled(%Fulfillment{} = fulfillment) do
+    guarded_transition(fulfillment, :cancelled, [:pending, :processing, :failed], %{})
   end
-
-  def mark_cancelled(%Fulfillment{}), do: refuse(@invalid_transition)
 
   @doc """
   Lists the deliveries `scope` is allowed to see: every delivery for an admin,
@@ -388,25 +465,60 @@ defmodule Cass.Fulfillment do
 
   ## Lifecycle internals
 
+  # One place performs a transition, so the allowed-transition check and the
+  # write can never disagree.
+  #
+  # Unlike a struct-based transition, this re-reads the row and gates the update
+  # on the status it is *actually* in: the allowed-from states become a `WHERE`
+  # clause, not a check on the struct handed in. That is what makes an in-flight
+  # job safe — a delivery that has been cancelled or fulfilled underneath it
+  # updates zero rows and is refused, instead of resurrecting a terminal row and
+  # granting its entitlement a second time.
+  defp guarded_transition(%Fulfillment{id: id}, to, allowed_from, changes)
+       when is_integer(id) do
+    query =
+      from f in Fulfillment,
+        where: f.id == ^id and f.status in ^allowed_from
+
+    # `changes` may not carry its own `:status`, otherwise it would land after
+    # the guarded value and quietly win. Filter it out of the caller's changes
+    # before appending them.
+    assignments =
+      [status: dump_status(to), updated_at: utc_now()] ++
+        for {field, value} <- changes, field != :status, do: {field, value}
+
+    case Repo.update_all(query, set: assignments) do
+      {1, _} -> reload(id)
+      {0, _} -> refuse(@invalid_transition)
+    end
+  end
+
   # A struct that is not a stored row has nothing to write to. Refusing it here
-  # — before `Repo.update/1` could raise on a missing primary key — keeps the
+  # — before `Repo.update_all/2` could raise on a missing primary key — keeps the
   # lifecycle total: every entry point answers `{:ok, _}` or
   # `{:error, changeset}` and none of them raises, whatever it is handed.
-  defp transition(%Fulfillment{id: nil}, _from, _to, _changes) do
+  defp guarded_transition(_fulfillment, _to, _allowed_from, _changes) do
     refuse(@invalid_transition)
   end
 
-  # One place performs a transition, so the allowed-transition check and the
-  # write can never disagree. The repeated `from` in the head is deliberate: it
-  # only matches a caller that passed the status it is actually in, so a stale
-  # struct cannot be pushed forward from a state it has already left.
-  defp transition(%Fulfillment{status: from} = fulfillment, from, to, changes) do
-    if Fulfillment.transition_allowed?(from, to) do
-      fulfillment
-      |> Fulfillment.changeset(Map.put(changes, :status, to))
-      |> Repo.update()
-    else
-      refuse(@invalid_transition)
+  # `update_all/2` takes raw (already dumped) values, so the atom has to be
+  # dumped the same way `Ecto.Type` would dump it for a changeset.
+  defp dump_status(status) do
+    {:ok, dumped} = Ecto.Type.dump(Fulfillment.__schema__(:type, :status), status)
+    dumped
+  end
+
+  defp reload(id) do
+    case Repo.get(Fulfillment, id) do
+      nil -> refuse(@invalid_transition)
+      fulfillment -> {:ok, fulfillment}
+    end
+  end
+
+  defp reload_with_order_item(id) do
+    case Repo.one(from f in Fulfillment, where: f.id == ^id, preload: [:order_item]) do
+      nil -> refuse(@invalid_transition)
+      fulfillment -> {:ok, fulfillment}
     end
   end
 

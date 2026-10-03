@@ -43,6 +43,19 @@ defmodule Cass.Delivery.Access do
   for, not infrastructure: it is derived from the server's signing secret, so
   the secret itself can never appear here, and no field is ever populated from
   raw catalog metadata (see `Cass.Delivery`).
+
+  ## What is deliberately *not* here: a credit balance
+
+  There is no `:credits_remaining` field, even though `:ai_gateway` is
+  metered. A capability is a statement about *what kind of right* this is, and a
+  balance is a number that changes on every run — putting it in a snapshot means
+  two overlapping requests would render two different "remaining" values from
+  the same struct, and the second one would be wrong by construction.
+
+  So the struct stays about the right's shape (`mechanism_for/1` already answers
+  "is this metered?") and the live balance is read from `Cass.Ai.balance/2`,
+  which is the single place a spend can be observed. Keeping them apart is what
+  stops a stale balance from being displayed as if it were authoritative.
   """
   @derive {Inspect, except: [:access_code]}
   defstruct [

@@ -85,3 +85,12 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# AI gateway for local development: a dummy key so `Cass.Ai.available?/0` is true
+# and the run panel is usable. The default `base_url` is the gateway's own
+# default; override it with `NEXUS_AI_BASE_URL` if yours runs elsewhere.
+config :cass, :nexus_ai,
+  api_key: "dev_dummy_nexus_ai_api_key_not_a_real_key",
+  model: "default"
+
+config :cass, Cass.Ai, gateways: [nexus: [module: Cass.Ai.Gateways.Nexus, enabled: true]]
