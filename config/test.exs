@@ -74,3 +74,21 @@ config :cass, Cass.Ai,
   # A deliberately small window so the rate-limit test is fast and stays
   # predictable rather than depending on wall-clock timing.
   rate_limit: [max_runs: 3, window_seconds: 60]
+
+# Oban runs in `:manual` mode for the whole suite: jobs are inserted for real
+# (inside the Ecto sandbox transaction, so they roll back with the test) but
+# nothing executes unless a test asks. `:manual` is what lets the payment tests
+# assert *that* a job was enqueued inside the payment transaction without a
+# worker racing the assertion, while the dedicated worker tests drain and run
+# jobs on demand via `Cass.Jobs.drain_all/0`.
+#
+# Cron is disabled here so the recovery sweep never fires spontaneously and
+# makes a test non-deterministic; the sweep's own tests invoke it directly.
+config :cass, Oban,
+  testing: :manual,
+  plugins: false
+
+# A small window so the abandoned-processing sweep test is fast and does not
+# depend on wall-clock timing. Production keeps the 15-minute value from
+# `config/config.exs`.
+config :cass, Cass.Fulfillment, abandoned_after_seconds: 60

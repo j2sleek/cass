@@ -91,6 +91,7 @@ defmodule Cass.Fulfillment do
   alias Cass.Delivery
   alias Cass.Entitlements
   alias Cass.Fulfillment.Fulfillment
+  alias Cass.Fulfillment.Worker
   alias Cass.Orders
   alias Cass.Orders.{Order, OrderItem}
   alias Cass.Repo
@@ -159,6 +160,42 @@ defmodule Cass.Fulfillment do
   def automatable?(kind) do
     kind in automatable_kinds()
   end
+
+  @doc """
+  Enqueues one `Cass.Fulfillment.Worker` job per automatable delivery.
+
+  Called from inside the payment transaction that creates the deliveries, which
+  is what makes the queue and the capture atomic: the job rows are written in the
+  same transaction and roll back with it. A purchase therefore cannot be paid for
+  without its delivery being queued, and no outbox or reconciliation pass is
+  involved.
+
+  Non-automatable kinds (`:smm`, `:manual`) are skipped rather than queued to do
+  nothing — they stay `:pending` for a human, as before.
+
+  Idempotent in the sense that matters: inserting a duplicate job is harmless
+  (`mark_fulfilled/1` and the unique indexes make a duplicate delivery a no-op),
+  and a replayed webhook that re-runs `create_for_paid_order/1` gets the same
+  existing rows back rather than creating new ones.
+
+  Returns `:ok`, or `{:error, changeset}` when a job could not be inserted — which
+  propagates out through the payment transaction so a capture is never committed
+  without its deliveries queued.
+  """
+  def enqueue_deliveries(fulfillments) when is_list(fulfillments) do
+    Enum.reduce_while(
+      Enum.filter(fulfillments, &automatable?(&1.kind)),
+      :ok,
+      fn fulfillment, :ok ->
+        case Oban.insert(Worker.new(worker_args(fulfillment))) do
+          {:ok, _job} -> {:cont, :ok}
+          {:error, %Ecto.Changeset{} = changeset} -> {:halt, {:error, changeset}}
+        end
+      end
+    )
+  end
+
+  defp worker_args(%Fulfillment{id: id}) when is_integer(id), do: %{"fulfillment_id" => id}
 
   @doc """
   Returns the fulfillment kind that delivers a product, either from a

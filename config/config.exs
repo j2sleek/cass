@@ -115,6 +115,28 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Background job queue for automated delivery.
+#
+# Two queues, because they have different urgency: `fulfillment` carries the work
+# a buyer is waiting on, `sweep` carries the periodic repair pass that re-enqueues
+# deliveries abandoned by a dead worker.
+config :cass, Oban,
+  repo: Cass.Repo,
+  queues: [fulfillment: 10, sweep: 1],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crons: [
+       {Cass.Fulfillment.RecoverySweep, "*/5 * * * *"}
+     ]},
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}
+  ]
+
+# How long a `:processing` delivery may sit untouched before the sweep treats it
+# as abandoned. Deliberately much larger than `Cass.Fulfillment.Worker.timeout/1`
+# (60s): a premature reclaim costs two workers on one row, while a delivery that
+# never runs at all costs a customer who paid and got nothing.
+config :cass, Cass.Fulfillment, abandoned_after_seconds: 900
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

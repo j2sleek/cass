@@ -48,6 +48,7 @@ defmodule Cass.Orders do
 
   alias Cass.Accounts.Scope
   alias Cass.Catalog.ProductVariant
+  alias Cass.Fulfillment.Fulfillment
   alias Cass.Orders.{Order, OrderItem}
   alias Cass.Repo
 
@@ -211,6 +212,102 @@ defmodule Cass.Orders do
   def get_paid_order(_order_id), do: {:error, :order_not_found}
 
   ## Checkout internals
+
+  @doc """
+  Marks a paid order `:completed`, once every delivery it owes has been delivered.
+
+  The *only* further exit from `:paid`, and it is deliberately conservative: the
+  order advances when **all** of its fulfillments are `:fulfilled`, and never
+  otherwise. A terminal-but-unsuccessful delivery (`:failed` or `:cancelled`)
+  does not count as success — the purchase is still owed, so the order is not
+  complete and support can retry it. Any `:pending` or `:processing` line also
+  blocks completion, which is what makes this safe to call early and repeatedly.
+
+  Partially fulfilled orders therefore stay `:paid`. That is the honest state: the
+  customer owns a mix of delivered and undelivered lines, and the order is only
+  finished when the last line lands.
+
+  Concurrency-safe and idempotent:
+
+    * an already-`:completed` order is returned unchanged, so the delivery worker
+    can call this on every successful delivery without coordinating;
+    * the `:paid → :completed` write is a conditional `UPDATE` on
+    `cass_orders.status`, and the "are all deliveries fulfilled?" test runs
+    first in the same transaction, so two workers completing the last two lines
+    concurrently cannot both decide on a half-updated view;
+    * a concurrent cancel/refund that wins the race causes this to refuse rather
+    than resurrect a cancelled order.
+
+  Returns `{:ok, order}`, or:
+
+    * `{:error, :order_not_found}` — no such order;
+    * `{:error, :not_paid}` — the order is not in a paid state;
+    * `{:error, :not_complete}` — at least one delivery is not `:fulfilled`.
+
+  Payment state is never touched: a completed order keeps its `:succeeded`
+  payment and stays refundable, because a refund is a separate, later decision.
+  """
+  def mark_order_completed(order_id) when is_integer(order_id) do
+    Repo.transact(fn ->
+      case lock_order(order_id) do
+        nil -> {:error, :order_not_found}
+        %Order{status: :completed} = order -> {:ok, order}
+        %Order{} = order -> complete_paid_order(order)
+      end
+    end)
+  end
+
+  def mark_order_completed(_order_id), do: {:error, :order_not_found}
+
+  # The row lock is what makes the read-then-write below safe: two workers
+  # completing the last two lines concurrently serialize here, so the second one
+  # observes the first one's commit rather than a half-updated view.
+  defp lock_order(order_id) do
+    Repo.one(from o in Order, where: o.id == ^order_id, lock: "FOR UPDATE")
+  end
+
+  defp complete_paid_order(%Order{status: :paid} = order) do
+    if all_fulfillments_fulfilled?(order.id) do
+      complete(order)
+    else
+      {:error, :not_complete}
+    end
+  end
+
+  defp complete_paid_order(%Order{}), do: {:error, :not_paid}
+
+  # Both counts, deliberately: an order with *no* fulfillments has nothing
+  # undelivered and so trivially "all fulfilled" on the unfulfilled query alone.
+  # Requiring at least one row is what stops an order that owes nothing from
+  # being completed by a delivery event it was never part of.
+  defp all_fulfillments_fulfilled?(order_id) do
+    unfulfilled =
+      Repo.exists?(
+        from f in Fulfillment,
+          where: f.order_id == ^order_id and f.status != :fulfilled,
+          select: 1
+      )
+
+    any = Repo.exists?(from f in Fulfillment, where: f.order_id == ^order_id, select: 1)
+
+    any and not unfulfilled
+  end
+
+  defp complete(%Order{id: id}) do
+    query =
+      from o in Order,
+        where: o.id == ^id and o.status == :paid
+
+    {count, _} =
+      Repo.update_all(query,
+        set: [status: :completed, updated_at: DateTime.truncate(DateTime.utc_now(), :second)]
+      )
+
+    case count do
+      1 -> {:ok, Repo.get!(Order, id)}
+      _other -> {:error, :not_paid}
+    end
+  end
 
   # Combines duplicated variant ids and validates the shape of every requested
   # item. Produces `%{variant_id => quantity}`.

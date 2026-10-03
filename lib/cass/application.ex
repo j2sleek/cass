@@ -13,6 +13,7 @@ defmodule Cass.Application do
       CassWeb.Telemetry,
       Cass.Repo,
       {DNSCluster, query: Application.get_env(:cass, :dns_cluster_query) || :ignore},
+      {Oban, Application.fetch_env!(:cass, Oban)},
       {Phoenix.PubSub, name: Cass.PubSub},
       # Start a worker by calling: Cass.Worker.start_link(arg)
       # {Cass.Worker, arg},

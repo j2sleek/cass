@@ -10,8 +10,9 @@ defmodule Cass.Fulfillment.IntegrationTest do
   the assertions hold against the same sequence production takes. Two properties
   matter as much as the happy path:
 
-    * a capture alone creates **no** delivery — the paid order is the
-      precondition, and the trigger is a separate, explicit step;
+    * a verified capture is what creates the deliveries, in the same transaction
+      as the `:paid` transition — so the chain cannot be left half-advanced, and
+      an *unverified* one still creates nothing;
     * a forged webhook body changes nothing, so the chain only ever advances
       through a verified capture.
   """
@@ -52,23 +53,27 @@ defmodule Cass.Fulfillment.IntegrationTest do
     assert {:ok, %{payment: payment}} = Payments.initialize_payment(ctx.buyer, ctx.order.id)
     assert payment.status == :processing
 
-    # 3. A verified success webhook pays the payment and the order together, and
-    #    by itself creates no delivery.
+    # 3. A verified success webhook pays the payment, marks the order paid, and
+    #    records what that purchase owes — one pending delivery per purchased
+    #    line, in the same transaction. No grant yet: recording the obligation is
+    #    not delivering it.
     body = charge_payload(payment.provider_reference, "success", 1497, "USD")
 
     assert :ok = Payments.handle_webhook(:paystack, body, %{"x-paystack-signature" => sign(body)})
     assert Repo.get!(Order, ctx.order.id).status == :paid
-    assert Repo.aggregate(FulfillmentRecord, :count) == 0
-    assert Repo.aggregate(Entitlement, :count) == 0
 
-    # 4. The trigger reads the authoritative paid order and owes one delivery per
-    #    purchased line.
-    assert {:ok, [fulfillment]} = Fulfillment.create_for_paid_order(ctx.order.id)
+    assert [fulfillment] = Repo.all(FulfillmentRecord)
     assert fulfillment.status == :pending
     assert fulfillment.kind == :digital
     assert fulfillment.product_type == :digital
     assert fulfillment.user_id == ctx.buyer.user.id
     assert Repo.aggregate(Entitlement, :count) == 0
+
+    # 4. The explicit trigger is now idempotent: re-running the worker's step
+    #    returns the delivery the capture already created, and creates no second.
+    assert {:ok, [same]} = Fulfillment.create_for_paid_order(ctx.order.id)
+    assert same.id == fulfillment.id
+    assert Repo.aggregate(FulfillmentRecord, :count) == 1
 
     # 5. Delivery completes, and the grant appears in the same call.
     assert {:ok, fulfillment} = Fulfillment.mark_processing(fulfillment)
@@ -94,7 +99,7 @@ defmodule Cass.Fulfillment.IntegrationTest do
     assert from_order.id == fulfillment.id
   end
 
-  test "replaying the whole trigger sequence changes nothing", ctx do
+  test "replaying the whole capture and trigger sequence changes nothing", ctx do
     Req.Test.stub(:paystack, success_init_stub())
     assert {:ok, %{payment: payment}} = Payments.initialize_payment(ctx.buyer, ctx.order.id)
     body = charge_payload(payment.provider_reference, "success", 1497, "USD")

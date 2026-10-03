@@ -53,6 +53,7 @@ defmodule Cass.Payments do
   import Ecto.Query, warn: false
 
   alias Cass.Accounts.Scope
+  alias Cass.Fulfillment
   alias Cass.Orders
   alias Cass.Orders.Order
   alias Cass.Payments.Payment
@@ -319,7 +320,9 @@ defmodule Cass.Payments do
       }
 
       with {:ok, payment} <- update_payment(payment, changes),
-           {:ok, _order} <- Orders.mark_order_paid(payment.order_id) do
+           {:ok, _order} <- Orders.mark_order_paid(payment.order_id),
+           {:ok, fulfillments} <- Fulfillment.create_for_paid_order(payment.order_id),
+           :ok <- Fulfillment.enqueue_deliveries(fulfillments) do
         {:ok, payment}
       else
         {:error, _} = error -> error
