@@ -210,12 +210,37 @@ defmodule Cass.Catalog do
   Returns all publicly discoverable products: status `:published`, visibility
   `:public`, due for publication, and belonging to an `:active` category.
   """
-  def list_public_products do
-    Product
-    |> public_product_query()
-    |> where([p], p.visibility == :public)
-    |> order_by([p], desc: p.published_at)
-    |> Repo.all()
+  def list_public_products, do: list_public_products([])
+
+  @doc """
+  Returns publicly discoverable products with optional discovery controls.
+
+  Supported options:
+
+    * `:q` — case-insensitive search across the name, short description,
+      and description
+    * `:sort` — `:newest` (default), `:price_asc`, `:price_desc`, or `:name`,
+      ordering by the lowest active-variant price for the price sorts
+    * `:limit` — maximum number of products to return
+
+  Products are always filtered to `:public` visibility via
+  `public_product_query/1`, so the search never surfaces drafts, unlisted
+  items, or products in inactive categories.
+  """
+  def list_public_products(opts) when is_list(opts) do
+    q = opts[:q]
+    sort = normalize_sort_option(opts[:sort] || :newest)
+    limit = opts[:limit]
+
+    query =
+      Product
+      |> public_product_query()
+      |> where([p], p.visibility == :public)
+      |> filter_products_by_terms(q)
+      |> order_public_products(sort)
+
+    query = if limit, do: from(p in query, limit: ^limit), else: query
+    Repo.all(query)
   end
 
   @doc "Returns the publicly discoverable products directly inside a category."
@@ -240,10 +265,6 @@ defmodule Cass.Catalog do
     |> where([p], p.slug == ^slug)
     |> where([p], p.visibility in [:public, :unlisted])
     |> Repo.one()
-    |> then(fn
-      nil -> nil
-      product -> Repo.preload(product, active_variants: public_variant_query())
-    end)
   end
 
   @doc """
@@ -686,7 +707,61 @@ defmodule Cass.Catalog do
       where: c.status == :active,
       where: p.status == :published,
       where: is_nil(p.published_at) or p.published_at <= ^now,
-      preload: [category: c]
+      preload: [
+        :owner,
+        category: c,
+        active_variants: ^public_variant_query()
+      ]
+  end
+
+  defp filter_products_by_terms(query, q) when is_binary(q) do
+    q = String.trim(q)
+
+    if q == "" do
+      query
+    else
+      pattern = "%#{q}%"
+
+      from p in query,
+        where:
+          ilike(p.name, ^pattern) or
+            ilike(fragment("coalesce(?, '')", p.short_description), ^pattern) or
+            ilike(fragment("coalesce(?, '')", p.description), ^pattern)
+    end
+  end
+
+  defp filter_products_by_terms(query, _q), do: query
+
+  defp normalize_sort_option(sort) when sort in ["name", :name], do: :name
+  defp normalize_sort_option(sort) when sort in ["price_asc", :price_asc], do: :price_asc
+  defp normalize_sort_option(sort) when sort in ["price_desc", :price_desc], do: :price_desc
+  defp normalize_sort_option(_other), do: :newest
+
+  defp order_public_products(query, :name), do: from(p in query, order_by: [asc: p.name])
+
+  defp order_public_products(query, :price_asc) do
+    from p in query,
+      left_join: sub in subquery(min_price_subquery()),
+      on: sub.product_id == p.id,
+      order_by: [asc_nulls_last: sub.min_price]
+  end
+
+  defp order_public_products(query, :price_desc) do
+    from p in query,
+      left_join: sub in subquery(min_price_subquery()),
+      on: sub.product_id == p.id,
+      order_by: [desc_nulls_last: sub.min_price]
+  end
+
+  defp order_public_products(query, _sort) do
+    from p in query, order_by: [desc: p.published_at]
+  end
+
+  defp min_price_subquery do
+    from v in ProductVariant,
+      where: v.active == true,
+      group_by: v.product_id,
+      select: %{product_id: v.product_id, min_price: min(v.price_cents)}
   end
 
   defp utc_now, do: DateTime.utc_now() |> DateTime.truncate(:second)

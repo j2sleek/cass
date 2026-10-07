@@ -103,7 +103,7 @@
       <div class="mx-auto w-full max-w-6xl px-4 pb-20 pt-16 sm:px-6 sm:pt-24 lg:px-8">
         <span class="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-semibold tracking-wide text-brand-700 uppercase dark:border-brand-800 dark:bg-brand-950 dark:text-brand-200">
           <span class="size-1.5 rounded-full bg-accent-500" aria-hidden="true"></span>
-          Foundation release · Milestone 1
+          Live marketplace
         </span>
 
         <h1
@@ -121,6 +121,38 @@
           products, and AI-powered utilities under a single account, catalog, and
           checkout — built server-side on Elixir, Phoenix LiveView, and PostgreSQL.
         </p>
+
+        <form
+          action={~p"/catalog"}
+          method="get"
+          role="search"
+          class="mt-8 max-w-xl"
+          aria-label="Search the marketplace"
+        >
+          <label for="home-search" class="sr-only">
+            Search the marketplace catalog
+          </label>
+          <div class="flex items-stretch gap-1.5 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-sm transition focus-within:border-brand-300 focus-within:ring-2 focus-within:ring-brand-500/30 dark:border-white/10 dark:bg-white/5">
+            <.icon
+              name="hero-magnifying-glass"
+              class="ml-2.5 size-5 self-center text-zinc-400"
+            />
+            <input
+              id="home-search"
+              type="search"
+              name="q"
+              placeholder="Search digital products, SMM, AI tools…"
+              class="h-11 w-full min-w-0 bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-white"
+            />
+            <button
+              id="home-search-submit"
+              type="submit"
+              class="shrink-0 rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            >
+              Search
+            </button>
+          </div>
+        </form>
 
         <div class="mt-9 flex flex-wrap items-center gap-3">
           <a
@@ -175,96 +207,87 @@
       aria-labelledby="categories-heading"
     >
       <div class="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <div class="max-w-2xl">
-          <p class="text-sm font-semibold tracking-wide text-brand-700 uppercase dark:text-brand-300">
-            Marketplace categories
-          </p>
-          <h2
-            id="categories-heading"
-            class="mt-2 text-3xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-4xl"
-          >
-            Browse what CASS will offer
-          </h2>
-          <p class="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">
-            Catalog pages, product listings, and checkout arrive in later milestones.
-            These categories define the roadmap.
-          </p>
-        </div>
-
-        <div class="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
-          <article class="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5">
-            <span class="grid size-12 place-items-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300">
-              <.icon name="hero-shopping-bag" class="size-6" />
-            </span>
-            <h3 class="mt-5 text-lg font-semibold text-zinc-900 dark:text-white">
-              Digital products
-            </h3>
-            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Templates, guides, code resources, and design assets delivered as
-              secure downloads or account entitlements.
+        <div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+          <div class="max-w-2xl">
+            <p class="text-sm font-semibold tracking-wide text-brand-700 uppercase dark:text-brand-300">
+              Marketplace catalog
             </p>
-            <div class="mt-4">
-              <span class="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                Coming in a later milestone
-              </span>
-            </div>
-          </article>
-
-          <article class="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5">
-            <span class="grid size-12 place-items-center rounded-xl bg-accent-50 text-accent-700 dark:bg-accent-950 dark:text-accent-300">
-              <.icon name="hero-megaphone" class="size-6" />
-            </span>
-            <h3 class="mt-5 text-lg font-semibold text-zinc-900 dark:text-white">
-              Social marketing services
-            </h3>
-            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Transparent content packages, campaign planning, analytics, and
-              reporting — never fake engagement or deceptive automation.
+            <h2
+              id="categories-heading"
+              class="mt-2 text-3xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-4xl"
+            >
+              Explore the marketplace
+            </h2>
+            <p class="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">
+              Browse live listings for digital products, compliant social
+              marketing services, and AI tools — by category or by what&apos;s
+              newest in the catalog.
             </p>
-            <div class="mt-4">
-              <span class="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                Coming in a later milestone
-              </span>
-            </div>
-          </article>
-
-          <article class="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-7 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/10 dark:bg-white/5">
-            <span class="grid size-12 place-items-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-300">
-              <.icon name="hero-sparkles" class="size-6" />
-            </span>
-            <h3 class="mt-5 text-lg font-semibold text-zinc-900 dark:text-white">AI tools</h3>
-            <p class="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Quota-controlled utilities such as caption generation, SEO
-              assistance, and product copy — routed through the Nexus AI Gateway.
-            </p>
-            <div class="mt-4">
-              <span class="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
-                Coming in a later milestone
-              </span>
-            </div>
-          </article>
-        </div>
-
-        <div class="mt-6 rounded-2xl border border-dashed border-zinc-300 p-7 dark:border-white/15">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-start gap-4">
-              <span class="grid size-12 shrink-0 place-items-center rounded-xl bg-zinc-100 text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
-                <.icon name="hero-truck" class="size-6" />
-              </span>
-              <div>
-                <h3 class="text-lg font-semibold text-zinc-900 dark:text-white">
-                  Physical products
-                </h3>
-                <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Selected goods from approved vendors are evaluated for a later
-                  phase, after inventory and shipping complexity is justified.
-                </p>
-              </div>
-            </div>
-            <span class="inline-flex shrink-0 items-center rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">
-              Not in MVP scope
-            </span>
           </div>
+          <.link
+            navigate={~p"/catalog"}
+            id="home-browse-catalog"
+            class="inline-flex shrink-0 items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            Browse all products <.icon name="hero-arrow-right" class="size-4" />
+          </.link>
+        </div>
+
+        <%= if @market_categories == [] do %>
+          <p class="mt-10 rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-white/15 dark:text-zinc-400">
+            Categories are on their way — check back soon.
+          </p>
+        <% else %>
+          <div class="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <%= for category <- Enum.take(@market_categories, 6) do %>
+              <.link
+                navigate={~p"/catalog/categories/#{category.slug}"}
+                class="group flex items-center gap-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:border-brand-500/40"
+              >
+                <span class="grid size-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">
+                  <.icon name="hero-folder" class="size-5" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block text-sm font-semibold tracking-tight text-zinc-900 group-hover:text-brand-700 dark:text-white">
+                    {category.name}
+                  </span>
+                  <span class="mt-1 block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                    <%= if category.description && category.description != "" do %>
+                      {category.description}
+                    <% else %>
+                      Active listings in this category
+                    <% end %>
+                  </span>
+                </span>
+              </.link>
+            <% end %>
+          </div>
+        <% end %>
+
+        <div class="mt-12">
+          <div class="flex items-baseline justify-between gap-4">
+            <h3 class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-white">
+              Latest listings
+            </h3>
+            <.link
+              navigate={~p"/catalog"}
+              class="text-sm font-medium text-brand-600 transition hover:text-brand-700 dark:text-brand-300"
+            >
+              View all
+            </.link>
+          </div>
+
+          <%= if @market_products == [] do %>
+            <p class="mt-6 rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-white/15 dark:text-zinc-400">
+              No listings published yet — the first products will appear here.
+            </p>
+          <% else %>
+            <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <%= for product <- @market_products do %>
+                <ProductCard.product_card product={product} />
+              <% end %>
+            </div>
+          <% end %>
         </div>
       </div>
     </section>
@@ -283,9 +306,9 @@
               What&apos;s included today
             </h2>
             <p class="mt-4 text-base leading-7 text-zinc-600 dark:text-zinc-300">
-              Milestone 1 establishes a clean, testable foundation. Commerce,
-              payments, and AI capabilities are deliberately deferred until the
-              core product surfaces are proven.
+              Everything on this page is live: a searchable catalog, Paystack-backed
+              checkout, tracked order fulfillment, and AI tools routed through the
+              Nexus AI Gateway — all server-rendered on Phoenix LiveView.
             </p>
           </div>
 
@@ -296,9 +319,10 @@
                 class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
               />
               <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Public storefront shell</p>
+                <p class="font-semibold text-zinc-900 dark:text-white">Live catalog and search</p>
                 <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Semantic, responsive, server-rendered landing page with SEO metadata and structured data.
+                  Published products with category browsing, free-text search, and
+                  price sorting across digital products, marketing services, and AI tools.
                 </p>
               </div>
             </li>
@@ -308,10 +332,12 @@
                 class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
               />
               <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Health endpoint</p>
+                <p class="font-semibold text-zinc-900 dark:text-white">
+                  Secure checkout and orders
+                </p>
                 <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  <code class="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-white/10">GET /api/v1/health</code>
-                  reports application and database status.
+                  Paystack-powered payments, per-line order tracking, and automatic
+                  fulfillment delivery when a paid order completes.
                 </p>
               </div>
             </li>
@@ -321,9 +347,12 @@
                 class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
               />
               <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Continuous checks</p>
+                <p class="font-semibold text-zinc-900 dark:text-white">
+                  AI tools via Nexus Gateway
+                </p>
                 <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Automated formatting, compilation, and test checks run on every push via GitHub Actions.
+                  Quota-controlled AI utilities with a graceful unavailable state —
+                  the marketplace works fully even when the AI gateway is offline.
                 </p>
               </div>
             </li>
@@ -333,9 +362,10 @@
                 class="mt-0.5 size-5 shrink-0 text-accent-600 dark:text-accent-400"
               />
               <div>
-                <p class="font-semibold text-zinc-900 dark:text-white">Documented roadmap</p>
+                <p class="font-semibold text-zinc-900 dark:text-white">Seller and vendor tools</p>
                 <p class="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                  Architecture, API contract, data model, security, and deployment plans under <code class="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-white/10">docs/</code>.
+                  Create, edit, price, and publish products with variants from the
+                  vendor dashboard, with clear authorization boundaries.
                 </p>
               </div>
             </li>
@@ -360,9 +390,10 @@
             and PostgreSQL.
           </p>
           <p class="mt-4 max-w-sm text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-            Checkout and Paystack payments are live: a paid order is tracked line by
-            line as a delivery, and completing a delivery records your access. Delivery
-            automation and AI features are still to come.
+            Paystack checkout and automated fulfillment are live: a paid order is
+            tracked line by line as a delivery, and completing a delivery records
+            your access. AI tools run through the Nexus AI Gateway with a graceful
+            fallback when the gateway is unavailable.
           </p>
         </div>
 
@@ -370,16 +401,29 @@
           <h3 id="footer-heading" class="sr-only">Footer</h3>
           <p class="text-sm font-semibold text-zinc-900 dark:text-white">Marketplace</p>
           <ul class="mt-4 space-y-3 text-sm">
-            <li class="text-zinc-500 dark:text-zinc-400">
-              Digital products
-              <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
+            <li>
+              <a
+                href={~p"/catalog"}
+                class="inline-block py-1.5 text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+              >
+                Browse the catalog
+              </a>
             </li>
-            <li class="text-zinc-500 dark:text-zinc-400">
-              Marketing services
-              <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
+            <li>
+              <a
+                href={~p"/catalog"}
+                class="inline-block py-1.5 text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+              >
+                Latest listings
+              </a>
             </li>
-            <li class="text-zinc-500 dark:text-zinc-400">
-              AI tools <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
+            <li>
+              <a
+                href={~p"/catalog"}
+                class="inline-block py-1.5 text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+              >
+                Search the catalog
+              </a>
             </li>
             <li class="text-zinc-500 dark:text-zinc-400">
               Physical products

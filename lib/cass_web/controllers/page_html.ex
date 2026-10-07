@@ -6,5 +6,7 @@ defmodule CassWeb.PageHTML do
   """
   use CassWeb, :html
 
+  alias CassWeb.ProductCard
+
   embed_templates "page_html/*"
 end

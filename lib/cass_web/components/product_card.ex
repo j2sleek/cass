@@ -2,6 +2,9 @@ defmodule CassWeb.ProductCard do
   @moduledoc """
   Renders a product card linking to its public page. Used by the catalog
   index and category pages.
+
+  Cards surface the marketplace essentials at a glance: product type, name,
+  description, the lowest available price, and the seller identity.
   """
   use CassWeb, :html
 
@@ -16,7 +19,7 @@ defmodule CassWeb.ProductCard do
 
   def product_card(assigns) do
     ~H"""
-    <div class="flex flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:border-brand-500/40">
+    <div class="group flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:border-brand-500/40">
       <.link
         navigate={~p"/catalog/products/#{@product.slug}"}
         class="flex h-full flex-col items-start"
@@ -32,17 +35,54 @@ defmodule CassWeb.ProductCard do
             {@product.short_description}
           </p>
         <% end %>
-        <span class="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 dark:text-brand-300">
-          View product
-          <.icon
-            name="hero-arrow-right"
-            class="size-3.5 transition group-hover:translate-x-0.5"
-          />
-        </span>
+        <div class="mt-4 flex w-full items-end justify-between gap-3">
+          <div class="min-w-0">
+            <%= if @product.active_variants != [] do %>
+              <span class="block text-base font-bold tracking-tight text-zinc-900 dark:text-white">
+                {price_label(@product.active_variants)}
+              </span>
+            <% end %>
+            <span class="mt-0.5 block truncate text-xs font-medium text-zinc-500 dark:text-zinc-400">
+              {vendor_label(@product)}
+            </span>
+          </div>
+          <span class="grid size-8 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-600 transition group-hover:translate-x-0.5 group-hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:group-hover:bg-brand-500/20">
+            <.icon name="hero-arrow-right" class="size-4" />
+          </span>
+        </div>
       </.link>
     </div>
     """
   end
 
   defp product_type_label(product_type), do: Map.fetch!(@product_type_labels, product_type)
+
+  # The lowest price across the active variants, prefixed with "From" when the
+  # product offers more than one distinct price point.
+  defp price_label(variants) do
+    prices = Enum.map(variants, &{&1.price_cents, &1.currency}) |> Enum.uniq()
+    {cents, currency} = Enum.min_by(prices, &elem(&1, 0))
+    price = money(cents, currency)
+
+    if length(prices) > 1, do: "From #{price}", else: price
+  end
+
+  # Seller identity: a platform-owned product is sold by CASS itself; owned
+  # products show a handle derived from the seller's verified email.
+  defp vendor_label(%{owner: nil}), do: "Sold by CASS"
+
+  defp vendor_label(%{owner: %{email: email}}) when is_binary(email) do
+    case String.split(email, "@", parts: 2) do
+      [handle | _] when handle != "" -> "Sold by #{handle}"
+      _ -> "Sold by CASS"
+    end
+  end
+
+  defp vendor_label(_product), do: "Sold by CASS"
+
+  defp money(cents, currency) when is_integer(cents) do
+    dollars = div(cents, 100)
+    remainder = rem(cents, 100) |> Integer.to_string() |> String.pad_leading(2, "0")
+    "#{currency} #{dollars}.#{remainder}"
+  end
 end

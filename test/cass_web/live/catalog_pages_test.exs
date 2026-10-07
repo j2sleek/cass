@@ -243,4 +243,113 @@ defmodule CassWeb.CatalogPagesTest do
       assert html =~ ~s(name="robots" content="noindex, follow")
     end
   end
+
+  describe "catalog search and sort" do
+    setup %{admin_scope: admin_scope} do
+      {:ok, category} = Catalog.create_category(%{name: "Media", slug: "media"})
+
+      publish = fn name, slug, price ->
+        {:ok, product} =
+          Catalog.create_product(category, %{
+            name: name,
+            slug: slug,
+            product_type: :digital,
+            visibility: :public,
+            short_description: "A #{name} listing."
+          })
+
+        {:ok, published} = Catalog.publish_product(admin_scope, product)
+
+        {:ok, _variant} =
+          Catalog.create_variant(admin_scope, published, %{
+            name: "Standard",
+            sku: "STD-#{slug}",
+            price_cents: price,
+            currency: "USD",
+            stock: 5,
+            active: true
+          })
+
+        published
+      end
+
+      vinyl = publish.("Vintage Vinyl", "vintage-vinyl", 5000)
+      camera = publish.("Vintage Camera", "vintage-camera", 15_000)
+      lens = publish.("Modern Lens", "modern-lens", 10_000)
+      %{vinyl: vinyl, camera: camera, lens: lens}
+    end
+
+    defp product_hrefs(view) do
+      view
+      |> render()
+      |> then(&Regex.scan(~r{href="/catalog/products/([a-z0-9-]+)"}, &1))
+      |> Enum.map(fn [_, slug] -> slug end)
+    end
+
+    test "GET /catalog?q= filters products and shows the search summary", %{
+      vinyl: vinyl,
+      camera: camera
+    } do
+      {:ok, view, _html} = live(build_conn(), "/catalog?q=vintage")
+
+      assert has_element?(view, "h2", "Search results")
+      assert has_element?(view, "#search-summary")
+      assert has_element?(view, "div", "Vintage Vinyl")
+      assert has_element?(view, "div", "Vintage Camera")
+      refute has_element?(view, "div", "Modern Lens")
+      assert vinyl.status == :published
+      assert camera.status == :published
+    end
+
+    test "GET /catalog?q= with no matches shows the dedicated empty state" do
+      {:ok, view, _html} = live(build_conn(), "/catalog?q=zzz-no-match")
+
+      assert has_element?(view, "h2", "Search results")
+      assert has_element?(view, "div", "No products match your search")
+      refute has_element?(view, "h2", "Latest additions")
+    end
+
+    test "submitting the search form refilters and updates the summary" do
+      {:ok, view, _html} = live(build_conn(), "/catalog")
+
+      assert has_element?(view, "h2", "Latest additions")
+
+      view
+      |> element("#catalog-search-form")
+      |> render_submit(%{"q" => "camera"})
+
+      assert has_element?(view, "h2", "Search results")
+      assert has_element?(view, "div", "Vintage Camera")
+      refute has_element?(view, "div", "Vintage Vinyl")
+    end
+
+    test "the sort select reorders products by lowest price" do
+      {:ok, view, _html} = live(build_conn(), "/catalog")
+
+      view
+      |> element("#catalog-sort-form")
+      |> render_change(%{"sort" => "price_asc"})
+
+      assert product_hrefs(view) == ["vintage-vinyl", "modern-lens", "vintage-camera"]
+
+      view
+      |> element("#catalog-sort-form")
+      |> render_change(%{"sort" => "price_desc"})
+
+      assert product_hrefs(view) == ["vintage-camera", "modern-lens", "vintage-vinyl"]
+    end
+
+    test "clear search returns to the full catalog listing" do
+      {:ok, view, _html} = live(build_conn(), "/catalog?q=vintage")
+
+      assert has_element?(view, "#search-summary")
+
+      view
+      |> element("a[href='/catalog']#clear-search, #search-summary a")
+      |> render_click()
+
+      assert has_element?(view, "h2", "Latest additions")
+      refute has_element?(view, "#search-summary")
+    end
+  end
 end

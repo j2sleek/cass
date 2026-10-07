@@ -498,4 +498,150 @@ defmodule Cass.CatalogTest do
       assert Catalog.get_public_product_by_slug("private-item") == nil
     end
   end
+
+  describe "public product discovery controls" do
+    setup %{admin_scope: admin_scope} do
+      {:ok, category} =
+        Catalog.create_category(%{name: "Media", slug: "media"})
+
+      publish = fn name, slug, description, price ->
+        {:ok, product} =
+          Catalog.create_product(category, %{
+            name: name,
+            slug: slug,
+            product_type: :digital,
+            visibility: :public,
+            short_description: description
+          })
+
+        {:ok, published} = Catalog.publish_product(admin_scope, product)
+
+        {:ok, _variant} =
+          Catalog.create_variant(
+            admin_scope,
+            published,
+            variant_attrs(slug, %{price_cents: price})
+          )
+
+        published
+      end
+
+      vinyl = publish.("Vintage Vinyl", "vintage-vinyl", "analog audio", 5000)
+      camera = publish.("Vintage Camera", "vintage-camera", "classic photography", 15_000)
+
+      {:ok, lens} =
+        Catalog.create_product(category, %{
+          name: "Modern Lens",
+          slug: "modern-lens",
+          product_type: :ai,
+          visibility: :public,
+          short_description: "mirrorless photography"
+        })
+
+      {:ok, published_lens} = Catalog.publish_product(admin_scope, lens)
+
+      {:ok, _} =
+        Catalog.create_variant(
+          admin_scope,
+          published_lens,
+          variant_attrs("modern-lens", %{price_cents: 10_000})
+        )
+
+      {:ok, _} =
+        Catalog.create_variant(
+          admin_scope,
+          published_lens,
+          variant_attrs("modern-lens", %{price_cents: 12_000, sku: "ML-LARGE", name: "Pro"})
+        )
+
+      %{vinyl: vinyl, camera: camera, lens: published_lens}
+    end
+
+    defp variant_attrs(slug, overrides \\ %{}) do
+      Map.merge(
+        %{
+          name: "Standard",
+          sku: "V-#{slug}",
+          price_cents: 999,
+          currency: "USD",
+          stock: 5,
+          active: true
+        },
+        overrides
+      )
+    end
+
+    test "search matches product names case-insensitively", %{vinyl: vinyl, camera: camera} do
+      assert [%{slug: "vintage-vinyl"}] = Catalog.list_public_products(q: "vintage vinyl")
+
+      vintage = Catalog.list_public_products(q: "VINTAGE")
+      assert length(vintage) == 2
+      assert Enum.map(vintage, & &1.id) |> Enum.sort() == Enum.sort([vinyl.id, camera.id])
+    end
+
+    test "search matches short descriptions", %{camera: camera, lens: lens} do
+      slugs = Enum.map(Catalog.list_public_products(q: "photography"), & &1.slug)
+      assert Enum.sort(slugs) == Enum.sort([camera.slug, lens.slug])
+    end
+
+    test "search with no matches and blank terms", %{vinyl: vinyl, camera: camera, lens: lens} do
+      assert Catalog.list_public_products(q: "no-such-product-anywhere") == []
+      assert length(Catalog.list_public_products(q: "  ")) == 3
+      assert length(Catalog.list_public_products(q: nil)) == 3
+
+      all = Catalog.list_public_products()
+      assert length(all) == 3
+      assert Enum.map(all, & &1.id) |> Enum.sort() == Enum.sort([vinyl.id, camera.id, lens.id])
+    end
+
+    test "search never surfaces unpublished products" do
+      {:ok, category} = Catalog.create_category(%{name: "Hidden", slug: "hidden-media"})
+
+      {:ok, draft} =
+        Catalog.create_product(category, %{
+          name: "Vintage Draft",
+          slug: "vintage-draft",
+          product_type: :digital
+        })
+
+      assert Catalog.list_public_products(q: "vintage-draft") == []
+      assert draft.status == :draft
+    end
+
+    test "sort by price asc and desc uses the lowest variant price", %{
+      vinyl: vinyl,
+      camera: camera,
+      lens: lens
+    } do
+      assert [%{id: id1}, %{id: id2}, %{id: id3}] = Catalog.list_public_products(sort: :price_asc)
+      assert [id1, id2, id3] == [vinyl.id, lens.id, camera.id]
+
+      assert [%{id: id3}, %{id: id2}, %{id: id1}] =
+               Catalog.list_public_products(sort: :price_desc)
+
+      assert [id1, id2, id3] == [vinyl.id, lens.id, camera.id]
+    end
+
+    test "sort by name is alphabetical", %{camera: camera, vinyl: vinyl, lens: lens} do
+      assert [first, second, third] = Catalog.list_public_products(sort: :name)
+      assert [first.id, second.id, third.id] == [lens.id, camera.id, vinyl.id]
+    end
+
+    test "unknown sort falls back to newest and limit truncates" do
+      default = Catalog.list_public_products()
+
+      assert Enum.map(default, & &1.id) ==
+               Enum.map(Catalog.list_public_products(sort: :bogus), & &1.id)
+
+      assert length(Catalog.list_public_products(limit: 2)) == 2
+    end
+
+    test "cards read price and seller identity from preloaded data", %{vinyl: vinyl} do
+      [card] = Catalog.list_public_products(q: "vintage vinyl")
+
+      assert [%{price_cents: 5000}] = card.active_variants
+      assert card.owner == nil
+      assert card.id == vinyl.id
+    end
+  end
 end
