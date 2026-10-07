@@ -164,7 +164,7 @@ defmodule CassWeb.OrdersLiveTest do
       refute has_element?(
                view,
                "div",
-               "Purchase and delivery options for this product are coming soon"
+               "This product has no purchase options yet"
              )
     end
 
@@ -174,10 +174,10 @@ defmodule CassWeb.OrdersLiveTest do
       assert has_element?(view, "#buy-sign-in")
       assert has_element?(view, "#product-log-in-link", "Log in")
       refute has_element?(view, "#buy-form")
-      refute has_element?(view, "div", "coming soon")
+      refute has_element?(view, "div", "no purchase options")
     end
 
-    test "a product without active variants keeps the coming-soon box" do
+    test "a product without active variants shows the waiting state" do
       {:ok, category} = Catalog.create_category(%{name: "Tools", slug: "tools"})
       owner = Scope.for_user(vendor_fixture())
 
@@ -196,7 +196,7 @@ defmodule CassWeb.OrdersLiveTest do
       assert has_element?(
                view,
                "div",
-               "Purchase and delivery options for this product are coming soon as the marketplace grows."
+               "This product has no purchase options yet — check back soon."
              )
 
       refute has_element?(view, "#buy-panel")
