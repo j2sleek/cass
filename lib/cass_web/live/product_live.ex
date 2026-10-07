@@ -36,6 +36,10 @@ defmodule CassWeb.ProductLive do
         |> assign(:not_found, false)
         |> assign(:product, product)
         |> assign(:buy_form, build_buy_form(product.active_variants))
+        |> assign(
+          :default_sold_out?,
+          sold_out?(default_variant(product.active_variants))
+        )
         |> assign(:page_title, "#{Metadata.title(product)} · CASS Marketplace")
         |> assign(:meta_description, Metadata.product_description(product))
         |> assign(:canonical_url, CassWeb.Endpoint.url() <> ~p"/catalog/products/#{product.slug}")
@@ -135,16 +139,27 @@ defmodule CassWeb.ProductLive do
                 <%= if Scope.authenticated?(@current_scope) do %>
                   <div id="buy-panel" class="mt-6">
                     <h2 class="text-sm font-semibold tracking-tight text-zinc-900 dark:text-white">
-                      Buy {default_variant(@product.active_variants).name}
+                      {product_type_label(@product.product_type)} purchase
                     </h2>
                     <p class="mt-1 text-sm font-semibold text-brand-700 dark:text-brand-300">
-                      {money(
-                        default_variant(@product.active_variants).price_cents,
-                        default_variant(@product.active_variants).currency
-                      )}
+                      <span id="buy-unit-price">
+                        {money(
+                          default_variant(@product.active_variants).price_cents,
+                          default_variant(@product.active_variants).currency
+                        )}
+                      </span>
                       <span class="font-normal text-zinc-500 dark:text-zinc-400">
                         each · prices and stock verified at checkout
                       </span>
+                    </p>
+                    <p
+                      id="buy-stock-note"
+                      class={[
+                        "mt-1 text-sm font-medium text-amber-700 dark:text-amber-400",
+                        !@default_sold_out? && "hidden"
+                      ]}
+                    >
+                      This option is out of stock right now.
                     </p>
 
                     <.form
@@ -160,6 +175,8 @@ defmodule CassWeb.ProductLive do
                         name="product_variant_id"
                         label="Variant"
                         options={variant_options(@product.active_variants)}
+                        phx-hook=".VariantPrice"
+                        data-options={variant_price_data(@product.active_variants)}
                       />
                       <.input
                         field={@buy_form[:quantity]}
@@ -173,12 +190,38 @@ defmodule CassWeb.ProductLive do
                       <button
                         id="buy-button"
                         type="submit"
-                        class="mt-4 w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+                        disabled={@default_sold_out?}
+                        class="mt-4 w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Buy now
                       </button>
                     </.form>
                   </div>
+
+                  <script :type={Phoenix.LiveView.ColocatedHook} name=".VariantPrice">
+                    export default {
+                      mounted() {
+                        this.applyState();
+                        this.el.addEventListener("change", () => this.applyState());
+                      },
+                      applyState() {
+                        const options = JSON.parse(this.el.dataset.options || "[]");
+                        const selected = options.find(
+                          (option) => option.id === this.el.value
+                        );
+                        if (!selected) return;
+                        const panel = this.el.closest("#buy-panel");
+                        if (!panel) return;
+                        const unitPrice = panel.querySelector("#buy-unit-price");
+                        const stockNote = panel.querySelector("#buy-stock-note");
+                        const button = panel.querySelector("#buy-button");
+                        const soldOut = selected.stock === 0;
+                        if (unitPrice) unitPrice.textContent = `${selected.price}`;
+                        if (stockNote) stockNote.classList.toggle("hidden", !soldOut);
+                        if (button) button.disabled = soldOut;
+                      },
+                    };
+                  </script>
                 <% else %>
                   <div
                     id="buy-sign-in"
@@ -196,8 +239,7 @@ defmodule CassWeb.ProductLive do
                 <% end %>
               <% else %>
                 <div class="mt-6 rounded-xl bg-zinc-50 p-4 text-xs leading-5 text-zinc-500 dark:bg-white/5 dark:text-zinc-400">
-                  Purchase and delivery options for this product are coming soon as the
-                  marketplace grows.
+                  This product has no purchase options yet — check back soon.
                 </div>
               <% end %>
             </div>
@@ -223,8 +265,34 @@ defmodule CassWeb.ProductLive do
   defp build_buy_form(_no_variants), do: nil
 
   defp default_variant([first_variant | _rest]), do: first_variant
+  defp default_variant([]), do: nil
 
-  defp variant_options(variants), do: Enum.map(variants, &{&1.name, &1.id})
+  defp sold_out?(nil), do: false
+  defp sold_out?(%{stock: stock}), do: is_nil(stock) or stock == 0
+
+  defp variant_options(variants) do
+    Enum.map(variants, fn variant ->
+      label =
+        "#{variant.name} — #{money(variant.price_cents, variant.currency)}" <>
+          if(sold_out?(variant), do: " (out of stock)", else: "")
+
+      {label, variant.id}
+    end)
+  end
+
+  # The hook reads this JSON to mirror the selection client-side: unit price,
+  # sold-out note, and the disabled Buy button all track the chosen variant.
+  defp variant_price_data(variants) do
+    variants
+    |> Enum.map(fn variant ->
+      %{
+        "id" => to_string(variant.id),
+        "price" => money(variant.price_cents, variant.currency),
+        "stock" => variant.stock || 0
+      }
+    end)
+    |> Jason.encode!()
+  end
 
   defp money(cents, currency) when is_integer(cents) do
     dollars = div(cents, 100)

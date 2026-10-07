@@ -244,6 +244,93 @@ defmodule CassWeb.CatalogPagesTest do
     end
   end
 
+  describe "product buy panel" do
+    setup %{admin_scope: admin_scope} do
+      {:ok, category} = Catalog.create_category(%{name: "Media", slug: "media"})
+
+      {:ok, product} =
+        Catalog.create_product(category, %{
+          name: "Tiered Product",
+          slug: "tiered-product",
+          product_type: :digital,
+          visibility: :public,
+          short_description: "Multiple purchase tiers."
+        })
+
+      {:ok, published} = Catalog.publish_product(admin_scope, product)
+
+      # The default tier is sold out (it is the first active variant), the
+      # second is purchasable.
+      {:ok, _} =
+        Catalog.create_variant(admin_scope, published, %{
+          name: "Deluxe",
+          sku: "TIER-DELUXE",
+          price_cents: 599,
+          currency: "USD",
+          stock: 0,
+          active: true
+        })
+
+      {:ok, _} =
+        Catalog.create_variant(admin_scope, published, %{
+          name: "Basic",
+          sku: "TIER-BASIC",
+          price_cents: 199,
+          currency: "USD",
+          stock: 5,
+          active: true
+        })
+
+      %{product: published}
+    end
+
+    defp visit_product(product) do
+      build_conn()
+      |> log_in_user(user_fixture())
+      |> live(~p"/catalog/products/#{product.slug}")
+    end
+
+    test "sold-out default tier renders out-of-stock price and disabled Buy", %{
+      product: product
+    } do
+      {:ok, view, html} = visit_product(product)
+
+      assert has_element?(view, "#buy-panel")
+
+      # The default variant is the sold-out Deluxe tier: the price reflects it,
+      # the stock note is visible (no `hidden` class), and Buy is disabled.
+      assert html =~ "USD 5.99"
+
+      [stock_class] =
+        Regex.run(
+          ~r{<p id="buy-stock-note"[^>]*class="([^"]*)"},
+          html,
+          capture: :all_but_first
+        )
+
+      assert stock_class =~ "text-amber-700"
+      refute stock_class =~ "hidden"
+
+      [buy_button] = Regex.run(~r{<button\b[^>]*id="buy-button"[^>]*>}, html)
+      assert buy_button =~ "disabled"
+    end
+
+    test "option labels carry price and sold-out state", %{product: product} do
+      {:ok, view, html} = visit_product(product)
+
+      assert html =~ "Deluxe — USD 5.99 (out of stock)"
+      assert html =~ "Basic — USD 1.99"
+      assert has_element?(view, "#buy-form")
+    end
+
+    test "guests are offered a sign-in prompt instead of the buy form", %{product: product} do
+      {:ok, view, _html} = live(build_conn(), ~p"/catalog/products/#{product.slug}")
+
+      assert has_element?(view, "#buy-sign-in")
+      refute has_element?(view, "#buy-panel")
+    end
+  end
+
   describe "catalog search and sort" do
     setup %{admin_scope: admin_scope} do
       {:ok, category} = Catalog.create_category(%{name: "Media", slug: "media"})
