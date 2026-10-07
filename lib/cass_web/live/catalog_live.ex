@@ -55,7 +55,7 @@ defmodule CassWeb.CatalogLive do
           <h2 class="text-lg font-semibold tracking-tight text-zinc-900 dark:text-white">
             Browse categories
           </h2>
-          <span class="text-xs font-medium text-zinc-400">
+          <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
             {@product_count} products available
           </span>
         </div>
@@ -67,7 +67,7 @@ defmodule CassWeb.CatalogLive do
         >
           <div
             id="empty-categories-grid"
-            class="col-span-full hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-400 only:block dark:border-white/10"
+            class="col-span-full hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500 only:block dark:text-zinc-400 dark:border-white/10"
           >
             No categories published yet.
           </div>
@@ -93,7 +93,7 @@ defmodule CassWeb.CatalogLive do
               <% end %>
               <span class="mt-3 flex flex-wrap gap-1.5">
                 <%= for child <- category.children do %>
-                  <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[0.65rem] font-medium text-zinc-500 dark:bg-white/10 dark:text-zinc-300">
+                  <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[0.65rem] font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
                     {child.name}
                   </span>
                 <% end %>
@@ -115,7 +115,7 @@ defmodule CassWeb.CatalogLive do
         >
           <div
             id="empty-products-grid"
-            class="col-span-full hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-400 only:block dark:border-white/10"
+            class="col-span-full hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500 only:block dark:text-zinc-400 dark:border-white/10"
           >
             No products published yet.
           </div>

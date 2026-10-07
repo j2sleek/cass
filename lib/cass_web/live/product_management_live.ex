@@ -138,7 +138,12 @@ defmodule CassWeb.ProductManagementLive do
           |> refresh_products(scope)
 
         {:error, changeset} ->
-          assign(socket, form: to_form(changeset))
+          socket
+          |> put_flash(
+            :error,
+            product_action_error(changeset, "The product could not be published.")
+          )
+          |> refresh_products(scope)
       end
     end)
   end
@@ -154,9 +159,24 @@ defmodule CassWeb.ProductManagementLive do
           |> refresh_products(scope)
 
         {:error, changeset} ->
-          assign(socket, form: to_form(changeset))
+          socket
+          |> put_flash(
+            :error,
+            product_action_error(changeset, "The product could not be archived.")
+          )
+          |> refresh_products(scope)
       end
     end)
+  end
+
+  # Publish/archive refusals carry a coarse `:base` reason ("only draft
+  # products can be published", "cannot publish products in an archived
+  # category"); show it instead of failing silently.
+  defp product_action_error(%Ecto.Changeset{errors: errors}, fallback) do
+    case List.keyfind(errors, :base, 0) do
+      {_key, {message, _opts}} -> message
+      _other -> fallback
+    end
   end
 
   @impl true
@@ -233,7 +253,7 @@ defmodule CassWeb.ProductManagementLive do
         phx-update="stream"
         class="mt-5 space-y-3"
       >
-        <div
+        <li
           :for={{dom_id, product} <- @products}
           id={dom_id}
           class="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:border-brand-300 hover:shadow-md sm:flex-row sm:items-center sm:justify-between dark:border-white/10 dark:bg-white/5 dark:hover:border-brand-500/40"
@@ -246,7 +266,7 @@ defmodule CassWeb.ProductManagementLive do
               ]}>
                 {product.status}
               </span>
-              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[0.65rem] font-medium text-zinc-500 dark:bg-white/10 dark:text-zinc-300">
+              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[0.65rem] font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
                 {product.visibility}
               </span>
               <span
@@ -280,11 +300,12 @@ defmodule CassWeb.ProductManagementLive do
               <button
                 id={"publish-product-button-#{product.id}"}
                 type="submit"
+                phx-disable-with="Publishing..."
                 disabled={product.status != :draft}
                 class={[
                   "rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 transition dark:border-white/10 dark:text-zinc-200",
-                  product.status == :draft && "cursor-not-allowed opacity-40",
-                  product.status != :draft && "hover:border-brand-300 hover:text-brand-700"
+                  product.status != :draft && "cursor-not-allowed opacity-40",
+                  product.status == :draft && "hover:border-brand-300 hover:text-brand-700"
                 ]}
               >
                 Publish
@@ -299,6 +320,7 @@ defmodule CassWeb.ProductManagementLive do
               <button
                 id={"archive-product-button-#{product.id}"}
                 type="submit"
+                phx-disable-with="Archiving..."
                 disabled={product.status == :archived}
                 class={[
                   "rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 transition dark:border-white/10 dark:text-zinc-200",
@@ -310,14 +332,14 @@ defmodule CassWeb.ProductManagementLive do
               </button>
             </.form>
           </div>
-        </div>
+        </li>
 
-        <div
+        <li
           id="product-list-empty"
-          class="hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-400 only:block dark:border-white/10"
+          class="hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500 only:block dark:text-zinc-400 dark:border-white/10"
         >
           No products yet. Create your first one to get started.
-        </div>
+        </li>
       </ul>
     </section>
     """
@@ -399,11 +421,11 @@ defmodule CassWeb.ProductManagementLive do
 
           <div class="fieldset mb-2">
             <label for="category_id">
-              <span class="label mb-1">Category</span>
+              <span class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">Category</span>
               <select
                 id="category_id"
                 name="category_id"
-                class="w-full select"
+                class="form-input"
               >
                 <option value="">Choose a category</option>
                 {Phoenix.HTML.Form.options_for_select(

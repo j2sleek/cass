@@ -20,7 +20,11 @@ defmodule Cass.Catalog.OwnershipTest do
   alias Cass.Catalog.Product
 
   setup do
-    {:ok, category} = Catalog.create_category(%{name: "Digital", slug: "digital"})
+    unique = System.unique_integer([:positive])
+
+    {:ok, category} =
+      Catalog.create_category(%{name: "Digital #{unique}", slug: "digital-#{unique}"})
+
     %{category: category}
   end
 

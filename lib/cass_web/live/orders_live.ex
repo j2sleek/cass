@@ -111,7 +111,7 @@ defmodule CassWeb.OrdersLive do
 
         <div
           id="orders-empty"
-          class="hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-400 only:block dark:border-white/10"
+          class="hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500 only:block dark:text-zinc-400 dark:border-white/10"
         >
           No orders yet. Browse the catalog to make your first purchase.
         </div>
@@ -134,7 +134,7 @@ defmodule CassWeb.OrdersLive do
       <% else %>
         <nav
           aria-label="Breadcrumb"
-          class="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500"
+          class="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400"
         >
           <.link
             navigate={~p"/orders"}

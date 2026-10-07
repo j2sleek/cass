@@ -86,7 +86,7 @@ defmodule CassWeb.CategoryLive do
           >
             <div
               id="empty-category-products"
-              class="col-span-full hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-400 only:block dark:border-white/10"
+              class="col-span-full hidden rounded-2xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500 only:block dark:text-zinc-400 dark:border-white/10"
             >
               No products in this category yet.
             </div>
@@ -107,7 +107,7 @@ defmodule CassWeb.CategoryLive do
     ~H"""
     <nav
       aria-label="Breadcrumb"
-      class="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500"
+      class="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400"
     >
       <.link navigate={~p"/"} class="transition hover:text-brand-700 dark:hover:text-brand-300">
         Home

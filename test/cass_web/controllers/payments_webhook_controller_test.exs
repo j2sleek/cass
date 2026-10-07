@@ -17,7 +17,11 @@ defmodule CassWeb.PaymentsWebhookControllerTest do
   @secret_key Application.compile_env(:cass, :paystack, []) |> Keyword.fetch!(:secret_key)
 
   setup do
-    {:ok, category} = Catalog.create_category(%{name: "Digital", slug: "digital"})
+    unique = System.unique_integer([:positive])
+
+    {:ok, category} =
+      Catalog.create_category(%{name: "Digital #{unique}", slug: "digital-#{unique}"})
+
     owner = Scope.for_user(vendor_fixture())
 
     {:ok, product} =

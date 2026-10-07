@@ -331,8 +331,14 @@ defmodule Cass.Orders.MarkOrderCompletedTest do
           Repo.update_all(from(o in Order, where: o.id == ^order.id), set: [status: "cancelled"])
         end)
 
-      assert {:ok, _} = Task.await(complete, :infinity)
+      complete_result = Task.await(complete, :infinity)
       assert {1, _} = Task.await(cancel, :infinity)
+
+      # The race has two legitimate interleavings: the guarded completion may
+      # win the row before the raw cancel lands, or it may observe the
+      # cancelled state first and refuse. Anything else (a crash, a completion
+      # of a cancelled order) would be a contract violation.
+      assert complete_result == {:error, :not_paid} or match?({:ok, _}, complete_result)
 
       # Whichever won, the row is in exactly one state and never flips back.
       final = Repo.get!(Order, order.id)

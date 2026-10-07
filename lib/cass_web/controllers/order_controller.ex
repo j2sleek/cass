@@ -59,15 +59,35 @@ defmodule CassWeb.OrderController do
   # page they posted from. The message is deliberately coarse, matching the
   # context API, so a direct POST cannot learn why something was refused.
   defp render_checkout_error(conn, changeset) do
-    return_to =
-      case Plug.Conn.get_req_header(conn, "referer") do
-        [referer | _rest] -> referer
-        _none -> ~p"/orders"
-      end
-
     conn
     |> put_flash(:error, checkout_error_message(changeset))
-    |> redirect(to: return_to)
+    |> redirect(to: checkout_return_path(conn))
+  end
+
+  # Browsers send an absolute URL in `Referer`, but `redirect/2` only accepts
+  # local paths. Sending the raw header through raised an ArgumentError (HTTP
+  # 500) on every failed checkout; the path (plus query) is used instead, and
+  # anything that is not a safe local path falls back to the order history.
+  defp checkout_return_path(conn) do
+    case Plug.Conn.get_req_header(conn, "referer") do
+      [referer | _rest] -> referer_local_path(referer)
+      _none -> ~p"/orders"
+    end
+  end
+
+  defp referer_local_path(referer) do
+    case URI.new(referer) do
+      {:ok, %URI{path: path} = uri} when is_binary(path) ->
+        target = path <> if(uri.query, do: "?" <> uri.query, else: "")
+
+        case Phoenix.URL.classify_local_path(target) do
+          :ok -> target
+          _unsafe -> ~p"/orders"
+        end
+
+      _malformed ->
+        ~p"/orders"
+    end
   end
 
   defp checkout_error_message(changeset) do

@@ -53,7 +53,7 @@ defmodule CassWeb.ProductLive do
       <% else %>
         <nav
           aria-label="Breadcrumb"
-          class="flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500"
+          class="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400"
         >
           <.link navigate={~p"/"} class="transition hover:text-brand-700 dark:hover:text-brand-300">
             Home
@@ -83,7 +83,7 @@ defmodule CassWeb.ProductLive do
                 {product_type_label(@product.product_type)}
               </span>
               <%= if @product.visibility == :unlisted do %>
-                <span class="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-500 dark:bg-white/10 dark:text-zinc-300">
+                <span class="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
                   Unlisted
                 </span>
               <% end %>

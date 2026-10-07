@@ -125,8 +125,8 @@ config :cass, Oban,
   queues: [fulfillment: 10, sweep: 1],
   plugins: [
     {Oban.Plugins.Cron,
-     crons: [
-       {Cass.Fulfillment.RecoverySweep, "*/5 * * * *"}
+     crontab: [
+       {"*/5 * * * *", Cass.Fulfillment.RecoverySweep}
      ]},
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}
   ]

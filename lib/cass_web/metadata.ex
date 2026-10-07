@@ -30,10 +30,13 @@ defmodule CassWeb.Metadata do
   defp truncate(text, max) when is_binary(text) do
     text = String.trim(text) |> String.replace(~r/\s+/, " ")
 
-    if String.length(text) <= max do
-      text
-    else
-      String.trim_trailing(String.slice(text, 0, max - 1)) <> "…"
+    cond do
+      # `""` is truthy in Elixir: without this clause an empty description
+      # short-circuited the `||` fallback and rendered an empty
+      # <meta name="description">.
+      text == "" -> nil
+      String.length(text) <= max -> text
+      true -> String.trim_trailing(String.slice(text, 0, max - 1)) <> "…"
     end
   end
 
@@ -41,5 +44,10 @@ defmodule CassWeb.Metadata do
 
   defp present(nil), do: nil
   defp present(""), do: nil
+
+  defp present(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
   defp present(value), do: value
 end

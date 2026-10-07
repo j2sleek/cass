@@ -71,7 +71,7 @@ defmodule CassWeb.Layouts do
     ~H"""
     <div class="min-h-screen bg-white text-zinc-800 dark:bg-[#0b0b14] dark:text-zinc-200">
       <header class="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/85 backdrop-blur dark:border-white/10 dark:bg-[#0b0b14]/85">
-        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div class="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2 sm:px-6 lg:px-8">
           <a
             href={~p"/"}
             class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
@@ -79,13 +79,14 @@ defmodule CassWeb.Layouts do
           >
             <Layouts.brand_mark />
           </a>
-          <nav class="flex items-center gap-1.5 sm:gap-2" aria-label="Primary">
-            <a
-              href="#categories"
-              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
+          <nav class="flex flex-wrap items-center gap-1.5 sm:gap-2" aria-label="Primary">
+            <.link
+              navigate={~p"/catalog"}
+              id="nav-categories"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
             >
               Categories
-            </a>
+            </.link>
 
             <%= if Scope.authenticated?(@current_scope) do %>
               <%!-- One place decides who sees the management link, and it is the

@@ -12,7 +12,11 @@ defmodule Cass.Catalog.VariantTest do
   alias Cass.Catalog.ProductVariant
 
   setup do
-    {:ok, category} = Catalog.create_category(%{name: "Digital", slug: "digital"})
+    unique = System.unique_integer([:positive])
+
+    {:ok, category} =
+      Catalog.create_category(%{name: "Digital #{unique}", slug: "digital-#{unique}"})
+
     %{category: category}
   end
 
@@ -22,7 +26,12 @@ defmodule Cass.Catalog.VariantTest do
   defp scope_for(:guest), do: Scope.for_user(nil)
 
   defp product_attrs do
-    %{name: "TikTok Followers", slug: "tiktok-followers", product_type: :smm, visibility: :public}
+    %{
+      name: "TikTok Followers",
+      slug: "tiktok-followers-#{System.unique_integer([:positive])}",
+      product_type: :smm,
+      visibility: :public
+    }
   end
 
   defp owned_product!(scope, category, overrides \\ %{}) do

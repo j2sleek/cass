@@ -36,6 +36,44 @@
         >
           Get started
         </a>
+        <%= if @current_scope && @current_scope.user do %>
+          <.link
+            navigate={~p"/users/settings"}
+            id="nav-settings"
+            class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
+          >
+            Settings
+          </.link>
+          <.form
+            for={to_form(%{}, as: "user")}
+            id="log-out-nav-form"
+            action={~p"/users/log-out"}
+            method="delete"
+          >
+            <button
+              id="nav-log-out"
+              type="submit"
+              class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
+            >
+              Log out
+            </button>
+          </.form>
+        <% else %>
+          <.link
+            navigate={~p"/users/log-in"}
+            id="nav-log-in"
+            class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
+          >
+            Log in
+          </.link>
+          <.link
+            navigate={~p"/users/register"}
+            id="nav-register"
+            class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:text-brand-700 dark:text-zinc-300 dark:hover:text-brand-300"
+          >
+            Create account
+          </.link>
+        <% end %>
         <span class="ml-1">
           <Layouts.theme_toggle />
         </span>
@@ -86,10 +124,10 @@
 
         <div class="mt-9 flex flex-wrap items-center gap-3">
           <a
-            href="#categories"
+            href={~p"/catalog"}
             class="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#0b0b14]"
           >
-            Browse categories <.icon name="hero-arrow-down" class="size-4" />
+            Browse categories <.icon name="hero-arrow-right" class="size-4" />
           </a>
           <a
             href="#features"
@@ -223,7 +261,7 @@
                 </p>
               </div>
             </div>
-            <span class="inline-flex shrink-0 items-center rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+            <span class="inline-flex shrink-0 items-center rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-400">
               Not in MVP scope
             </span>
           </div>
@@ -334,18 +372,18 @@
           <ul class="mt-4 space-y-3 text-sm">
             <li class="text-zinc-500 dark:text-zinc-400">
               Digital products
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
+              <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
             </li>
             <li class="text-zinc-500 dark:text-zinc-400">
               Marketing services
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
+              <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
             </li>
             <li class="text-zinc-500 dark:text-zinc-400">
-              AI tools <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
+              AI tools <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
             </li>
             <li class="text-zinc-500 dark:text-zinc-400">
               Physical products
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(later)</span>
+              <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(later)</span>
             </li>
           </ul>
         </nav>
@@ -365,14 +403,14 @@
             <li>
               <a
                 href={~p"/api/v1/health"}
-                class="text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
+                class="inline-block py-1.5 text-zinc-500 transition-colors hover:text-brand-700 dark:text-zinc-400 dark:hover:text-brand-300"
               >
                 Health endpoint
               </a>
             </li>
             <li class="text-zinc-500 dark:text-zinc-400">
               API reference
-              <span class="ml-1 text-xs text-zinc-400 dark:text-zinc-500">(soon)</span>
+              <span class="ml-1 text-xs text-zinc-500 dark:text-zinc-400">(soon)</span>
             </li>
           </ul>
         </nav>

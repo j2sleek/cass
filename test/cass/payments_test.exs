@@ -19,7 +19,11 @@ defmodule Cass.PaymentsTest do
   @secret_key Application.compile_env(:cass, :paystack, []) |> Keyword.fetch!(:secret_key)
 
   setup do
-    {:ok, category} = Catalog.create_category(%{name: "Digital", slug: "digital"})
+    unique = System.unique_integer([:positive])
+
+    {:ok, category} =
+      Catalog.create_category(%{name: "Digital #{unique}", slug: "digital-#{unique}"})
+
     %{category: category}
   end
 
@@ -31,7 +35,7 @@ defmodule Cass.PaymentsTest do
     {:ok, product} =
       Catalog.create_owned_product(owner, category, %{
         name: "TikTok Followers",
-        slug: "tiktok-followers",
+        slug: "tiktok-followers-#{System.unique_integer([:positive])}",
         product_type: :smm,
         visibility: :public
       })

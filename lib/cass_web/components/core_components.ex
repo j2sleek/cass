@@ -62,7 +62,7 @@ defmodule CassWeb.CoreComponents do
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
-      class="fixed top-20 right-4 z-50 flex items-start gap-3 rounded-xl border p-4 shadow-lg sm:right-6"
+      class="fixed top-20 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border p-4 shadow-lg sm:right-6 sm:max-w-md"
       {@rest}
     >
       <div :if={@kind == :info} class="flex flex-1 items-start gap-3">
@@ -81,7 +81,7 @@ defmodule CassWeb.CoreComponents do
       </div>
       <button
         type="button"
-        class="group cursor-pointer self-start text-zinc-500 hover:text-zinc-700"
+        class="group grid size-7 shrink-0 place-items-center self-start rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/5 dark:hover:text-zinc-300"
         aria-label={gettext("close")}
       >
         <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
@@ -263,11 +263,11 @@ defmodule CassWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">{@label}</span>
         <select
           id={@id}
           name={@name}
-          class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
+          class={[@class || "form-input", @errors != [] && (@error_class || "form-input-error")]}
           multiple={@multiple}
           {@rest}
         >
@@ -284,13 +284,13 @@ defmodule CassWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">{@label}</span>
         <textarea
           id={@id}
           name={@name}
           class={[
-            @class || "w-full textarea",
-            @errors != [] && (@error_class || "textarea-error")
+            @class || "form-input",
+            @errors != [] && (@error_class || "form-input-error")
           ]}
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
@@ -305,15 +305,15 @@ defmodule CassWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-2">
       <label for={@id}>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">{@label}</span>
         <input
           type={@type}
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
           class={[
-            @class || "w-full input",
-            @errors != [] && (@error_class || "input-error")
+            @class || "form-input",
+            @errors != [] && (@error_class || "form-input-error")
           ]}
           {@rest}
         />
@@ -326,7 +326,7 @@ defmodule CassWeb.CoreComponents do
   # Helper used by inputs to generate form errors
   defp error(assigns) do
     ~H"""
-    <p class="mt-1.5 flex gap-2 items-center text-sm text-error">
+    <p class="mt-1.5 flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
       <.icon name="hero-exclamation-circle" class="size-5" />
       {render_slot(@inner_block)}
     </p>

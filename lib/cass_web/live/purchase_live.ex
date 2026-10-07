@@ -88,7 +88,10 @@ defmodule CassWeb.PurchaseLive do
         <NotFound.not_found resource="purchase" />
       <% else %>
         <.access_details access={@access} />
+        <%!-- The run panel is a metered-AI surface; a digital or access-code
+              purchase has nothing to run, so it must not be offered one. --%>
         <.ai_panel
+          :if={@access.mechanism == :ai_gateway}
           balance={@balance}
           runs={@runs}
           result={@result}
@@ -266,6 +269,7 @@ defmodule CassWeb.PurchaseLive do
           <button
             id="ai-run-submit"
             type="submit"
+            phx-disable-with="Running..."
             disabled={!@available or remaining(@balance) == 0}
             class="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-zinc-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
           >

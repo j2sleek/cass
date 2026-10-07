@@ -13,13 +13,17 @@ defmodule CassWeb.PaymentControllerTest do
   alias Cass.Repo
 
   setup do
-    {:ok, category} = Catalog.create_category(%{name: "Digital", slug: "digital"})
+    unique = System.unique_integer([:positive])
+
+    {:ok, category} =
+      Catalog.create_category(%{name: "Digital #{unique}", slug: "digital-#{unique}"})
+
     owner = Scope.for_user(vendor_fixture())
 
     {:ok, product} =
       Catalog.create_owned_product(owner, category, %{
         name: "Controller Product",
-        slug: "controller-product",
+        slug: "controller-product-#{System.unique_integer([:positive])}",
         product_type: :digital,
         visibility: :public
       })

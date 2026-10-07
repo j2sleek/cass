@@ -38,8 +38,11 @@ defmodule Cass.CatalogTest do
     end
 
     test "create_category/1 rejects duplicate slugs" do
-      assert {:ok, _} = Catalog.create_category(%{name: "Digital", slug: "digital"})
-      assert {:error, changeset} = Catalog.create_category(%{name: "Digital 2", slug: "digital"})
+      unique = System.unique_integer([:positive])
+      slug = "digital-#{unique}"
+
+      assert {:ok, _} = Catalog.create_category(%{name: "Digital #{unique}", slug: slug})
+      assert {:error, changeset} = Catalog.create_category(%{name: "Digital 2", slug: slug})
       assert "has already been taken" in errors_on(changeset).slug
     end
 
