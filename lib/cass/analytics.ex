@@ -21,6 +21,7 @@ defmodule Cass.Analytics do
   | --------------- | --------------------------------------- | ---------------- |
   | `page_view`     | `CassWeb.Plugs.TrackPageView`           | `method`         |
   | `search`        | `CassWeb.CatalogLive`                   | `query`, `result_count`, `sort` |
+  | `filter`        | `CassWeb.CatalogLive`                   | `types`, `in_stock`, `min_price_cents`, `max_price_cents`, `result_count`, `sort` |
   | `product_view`  | `CassWeb.ProductLive`                   | `title`, `product_type` |
   | `order_created` | `Cass.Orders.create_order/2`            | `total_cents`, `currency`, `item_count` |
   | `order_paid`    | `Cass.Orders.mark_order_paid/1`         | `total_cents`, `currency` |

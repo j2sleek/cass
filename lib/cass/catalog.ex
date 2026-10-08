@@ -253,6 +253,109 @@ defmodule Cass.Catalog do
     |> Repo.all()
   end
 
+  ## Discovery filters
+  #
+  # These are pure functions over an already-loaded list rather than query
+  # options, and that is deliberate. `public_product_query/1` preloads
+  # `active_variants` on every row — variants are the authority on both price
+  # and stock, and the storefront renders that exact list — so filtering in
+  # memory costs no additional query and cannot disagree with what the page
+  # shows. Keeping them as ordinary functions also means a LiveView can derive
+  # facet counts from the same list it is about to render, so a facet count and
+  # the filtered result set can never come from two different queries.
+
+  @doc """
+  Keeps only the products whose `product_type` is one of `types`.
+
+  `types` is a list of atoms from the closed vocabulary (`product_types/0`);
+  anything outside it is ignored rather than raising, so URL-derived input can
+  never widen what the query means. An empty list is the "no type filter" case
+  and returns the input unchanged, in its original order, so a sort applied by
+  the caller survives.
+  """
+  def filter_by_product_types(products, types) when is_list(products) and is_list(types) do
+    case Enum.filter(product_types(), &(&1 in types)) do
+      [] -> products
+      allowed -> Enum.filter(products, &(&1.product_type in allowed))
+    end
+  end
+
+  @doc """
+  Keeps the products whose lowest active-variant price falls inside the
+  `min_price_cents`..`max_price_cents` band. Either bound may be `nil`.
+
+  The bound is the same "From $X" price a card shows and the same value the
+  price sorts order by, so a product filtered into the band is always displayed
+  at a price the buyer was shown. A product with no active variant has no price
+  and therefore cannot sit in a band, so an active band excludes it.
+  """
+  def filter_by_price_band(products, nil, nil), do: products
+
+  def filter_by_price_band(products, min_price_cents, max_price_cents)
+      when is_list(products) do
+    Enum.filter(products, fn product ->
+      case lowest_price_cents(product) do
+        nil -> false
+        price -> within_band?(price, min_price_cents, max_price_cents)
+      end
+    end)
+  end
+
+  @doc """
+  Keeps only the products that can be bought right now: at least one active
+  variant that is not sold out. A `nil` stock is unlimited supply, matching
+  `Cass.Catalog.ProductVariant.purchasable?/1`.
+
+  `false` (the default browsing state) is a no-op.
+  """
+  def filter_by_stock(products, false), do: products
+
+  def filter_by_stock(products, true) when is_list(products),
+    do: Enum.filter(products, &in_stock?/1)
+
+  @doc """
+  Returns the lowest price across a product's active variants in integer cents,
+  or `nil` when it has no active variant (a product nobody can buy yet, which is
+  why the card renders no price for it).
+  """
+  def lowest_price_cents(%{active_variants: variants}) when is_list(variants) do
+    case Enum.map(variants, & &1.price_cents) do
+      [] -> nil
+      prices -> Enum.min(prices)
+    end
+  end
+
+  def lowest_price_cents(_product), do: nil
+
+  @doc """
+  Returns true when the product has an active variant that is not sold out —
+  the storefront's "available now" test.
+  """
+  def in_stock?(%{active_variants: variants}) when is_list(variants) do
+    Enum.any?(variants, fn variant -> is_nil(variant.stock) or variant.stock > 0 end)
+  end
+
+  def in_stock?(_product), do: false
+
+  @doc """
+  Returns a facet map: every type in the closed vocabulary mapped to how many of
+  `products` carry it, zeros included.
+
+  Pass the list filtered by everything *except* the type facet — that is what
+  makes each count answer "how many would I get if I picked this type?" while
+  every other active filter stays applied.
+  """
+  def product_type_counts(products) when is_list(products) do
+    counts = Enum.frequencies_by(products, & &1.product_type)
+
+    Map.new(product_types(), fn type -> {type, Map.get(counts, type, 0)} end)
+  end
+
+  defp within_band?(price, min_price_cents, max_price_cents) do
+    (is_nil(min_price_cents) or price >= min_price_cents) and
+      (is_nil(max_price_cents) or price <= max_price_cents)
+  end
+
   @doc """
   Fetches a product by slug for the public web layer. Allows `:public` and
   `:unlisted` visibility (listings exclude `:unlisted`); returns `nil` for
