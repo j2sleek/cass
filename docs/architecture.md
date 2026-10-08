@@ -36,6 +36,8 @@ can later be split if needed. The active stack:
     — signed-in only (`/users/settings`)
   * `scope "/", CassWeb` + `pipe_through [:browser, :require_vendor_or_admin_user]`
     — sellers and admins only (`/manage/products*`)
+  * `scope "/", CassWeb` + `pipe_through [:browser, :require_admin_user]`
+    — admins only (`/insights`)
   * `scope "/api/v1", CassWeb.Api.V1` — JSON API (currently only health)
 
 The role guards (`require_admin_user`, `require_vendor_user`,
@@ -538,3 +540,16 @@ controls, and [docs/data-model.md](data-model.md) for the tables.
 * Role-specific HTTP behaviour is additionally checked against a running server
   (login with `role` params grants nothing, the session cookie carries no role,
   a grant shows up on the next request and a revoke on the one after).
+
+## Analytics and insights
+
+`Cass.Analytics` is the single write path (`track/2`) and read path for product
+and UX measurement; events live in the append-only `cass_analytics_events`
+table. A buffered writer (`Cass.Analytics.Writer`) keeps recording off the
+request path, the `:browser` pipeline records document page views
+(`CassWeb.Plugs.TrackPageView`), and LiveViews emit higher-level events
+(`search`, `product_view`) via `CassWeb.LiveAnalytics`. The admin-only
+`/insights` dashboard (`CassWeb.InsightsLive`) renders traffic, the purchase
+funnel, and the "searches with no results" product-idea feed. Analytics is an
+observer: it never influences a business decision and never fails a request.
+See [analytics.md](analytics.md).

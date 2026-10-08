@@ -405,17 +405,38 @@ defmodule Cass.Ai do
   # Written on every outcome, including refusals, and never fatal: losing an audit
   # row must not turn a successful run into an error for the buyer.
   defp _log(%CreditBalance{} = balance, status, reason, chars, model \\ nil) do
-    %Run{}
-    |> Run.changeset(%{
-      credit_balance_id: balance.id,
-      entitlement_id: balance.entitlement_id,
+    result =
+      %Run{}
+      |> Run.changeset(%{
+        credit_balance_id: balance.id,
+        entitlement_id: balance.entitlement_id,
+        user_id: balance.user_id,
+        status: status,
+        model: model,
+        prompt_chars: chars,
+        refusal_reason: reason
+      })
+      |> Repo.insert()
+
+    if match?({:ok, _}, result), do: track_run(balance, result, chars, model)
+
+    result
+  end
+
+  # Analytics observer: never raises, never blocks a run. Counts one attempt per
+  # audit row, including refused ones, which is what makes "how often do buyers
+  # hit the rate limit / run out of credits?" answerable.
+  defp track_run(%CreditBalance{} = balance, {:ok, run}, chars, model) do
+    Cass.Analytics.track("ai_run", %{
       user_id: balance.user_id,
-      status: status,
-      model: model,
-      prompt_chars: chars,
-      refusal_reason: reason
+      subject_type: "ai_run",
+      subject_id: run.id,
+      metadata: %{
+        "status" => run.status,
+        "model" => model,
+        "prompt_chars" => chars
+      }
     })
-    |> Repo.insert()
   end
 
   defp fetch_balance(entitlement_id) do

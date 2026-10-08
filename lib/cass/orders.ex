@@ -81,6 +81,7 @@ defmodule Cass.Orders do
         with {:ok, cart} <- prepare_cart(requested_items),
              {:ok, cart} <- reserve_stock(cart),
              {:ok, order} <- place_order(scope, cart) do
+          track_order_created(scope, order)
           {:ok, order}
         else
           {:error, _changeset} = error -> error
@@ -159,9 +160,14 @@ defmodule Cass.Orders do
   end
 
   def mark_order_paid(%Order{status: :awaiting_payment} = order) do
-    order
-    |> Order.changeset(%{status: :paid})
-    |> Repo.update()
+    case order |> Order.changeset(%{status: :paid}) |> Repo.update() do
+      {:ok, paid} = ok ->
+        track_order_paid(paid)
+        ok
+
+      {:error, _changeset} = error ->
+        error
+    end
   end
 
   def mark_order_paid(%Order{status: :paid} = order), do: {:ok, order}
@@ -171,6 +177,34 @@ defmodule Cass.Orders do
   end
 
   def mark_order_paid(_order_id), do: {:error, :order_not_found}
+
+  # Analytics observers. `Cass.Analytics.track/2` never raises and (in
+  # production) never blocks, so recording a funnel step can never delay or break
+  # a checkout or a capture.
+  defp track_order_created(scope, order) do
+    Cass.Analytics.track("order_created", %{
+      user_id: scope.user.id,
+      subject_type: "order",
+      subject_id: order.id,
+      metadata: %{
+        "total_cents" => order.total_cents,
+        "currency" => order.currency,
+        "item_count" => length(order.order_items)
+      }
+    })
+  end
+
+  defp track_order_paid(order) do
+    Cass.Analytics.track("order_paid", %{
+      user_id: order.user_id,
+      subject_type: "order",
+      subject_id: order.id,
+      metadata: %{
+        "total_cents" => order.total_cents,
+        "currency" => order.currency
+      }
+    })
+  end
 
   @doc """
   Fetches an order for a server-side caller that may only act on a **paid** order.

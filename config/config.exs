@@ -16,6 +16,11 @@ config :pbkdf2_elixir, rounds: 160_000
 # The authentication scope used by `CassWeb.UserAuth`. Roles/authorization
 # fields are deliberately absent in Milestone 3 Phase 1: the scope only carries
 # the resolved user, and it is resolved server-side, never from the request.
+# Product and UX analytics. `Cass.Analytics.Writer` buffers events and flushes
+# them in batches out of band; in the test suite the writer is disabled so events
+# are written synchronously inside the Ecto sandbox (see config/test.exs).
+config :cass, Cass.Analytics, writer: true
+
 config :cass, :scopes,
   user: [
     default: true,

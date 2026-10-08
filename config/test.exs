@@ -3,6 +3,10 @@ import Config
 # Only in tests, remove the complexity from the password hashing algorithm
 config :pbkdf2_elixir, :rounds, 1
 
+# In tests the analytics writer is disabled so events are inserted synchronously
+# inside the Ecto sandbox transaction and roll back with the test.
+config :cass, Cass.Analytics, writer: false
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

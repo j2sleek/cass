@@ -7,13 +7,14 @@ snapshot what was bought (names, SKU, price, currency, quantity, config) and
 reserve stock atomically; a captured payment moves the order to `:paid`; and a
 paid order now owes one **delivery per purchased line**
 (`cass_fulfillments`), whose completion grants the buyer a durable
-**entitlement** (`cass_entitlements`). Eleven domain tables exist: the three catalog
+**entitlement** (`cass_entitlements`). Fourteen domain tables exist: the three catalog
 tables, `cass_orders`/`cass_order_items`, `cass_payments`,
-`cass_fulfillments`/`cass_entitlements`, plus `cass_users`,
-`cass_users_tokens`, and `cass_user_roles`, owned by the `Cass.Catalog`,
-`Cass.Orders`, `Cass.Payments`, `Cass.Fulfillment`, `Cass.Entitlements`, and
-`Cass.Accounts` contexts. AI tool runtime data and vendor payouts arrive in
-later milestones.
+`cass_fulfillments`/`cass_entitlements`, the AI runtime tables
+(`cass_ai_runs`/`cass_ai_credit_balances`), the append-only analytics stream
+(`cass_analytics_events`), plus `cass_users`, `cass_users_tokens`, and
+`cass_user_roles`, owned by the `Cass.Catalog`, `Cass.Orders`, `Cass.Payments`,
+`Cass.Fulfillment`, `Cass.Entitlements`, `Cass.Ai`, `Cass.Analytics`, and
+`Cass.Accounts` contexts. Vendor payouts arrive in later milestones.
 
 ## Naming and conventions
 

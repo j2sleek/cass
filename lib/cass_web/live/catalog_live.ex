@@ -36,7 +36,23 @@ defmodule CassWeb.CatalogLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, load_products(socket, params)}
+    socket = load_products(socket, params)
+
+    # A search that produced a catalog view is demand we can measure. The
+    # `connected?/1` guard skips the dead render so each search is counted once,
+    # and the `q != ""` guard skips browsing without a query.
+    if connected?(socket) and socket.assigns.q != "" do
+      CassWeb.LiveAnalytics.track(socket, "search",
+        path: ~p"/catalog",
+        metadata: %{
+          "query" => socket.assigns.q,
+          "result_count" => socket.assigns.product_count,
+          "sort" => socket.assigns.sort
+        }
+      )
+    end
+
+    {:noreply, socket}
   end
 
   @impl true

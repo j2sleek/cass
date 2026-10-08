@@ -276,14 +276,27 @@ defmodule CassWeb.UserAuth do
   end
 
   defp mount_current_scope(socket, session) do
-    Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      {user, _inserted_at} =
-        if user_token = session["user_token"] do
-          Accounts.get_user_by_session_token(user_token)
-        end || {nil, nil}
+    socket =
+      Phoenix.Component.assign_new(socket, :current_scope, fn ->
+        {user, _inserted_at} =
+          if user_token = session["user_token"] do
+            Accounts.get_user_by_session_token(user_token)
+          end || {nil, nil}
 
-      Scope.for_user(user)
-    end)
+        Scope.for_user(user)
+      end)
+
+    # The page-view plug mints an anonymous visitor id into the signed session;
+    # carry it onto the socket so LiveViews can attribute their own events. When
+    # the session has no id (for example a LiveView mounted without a preceding
+    # document request) the socket is left exactly as it was.
+    case session["cass_visitor_id"] do
+      nil ->
+        socket
+
+      visitor_id ->
+        Phoenix.Component.assign_new(socket, :visitor_id, fn -> visitor_id end)
+    end
   end
 
   defp authorize(socket, requirement) do

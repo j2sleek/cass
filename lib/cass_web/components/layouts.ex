@@ -89,6 +89,15 @@ defmodule CassWeb.Layouts do
             </.link>
 
             <%= if Scope.authenticated?(@current_scope) do %>
+              <.link
+                :if={Scope.admin?(@current_scope)}
+                navigate={~p"/insights"}
+                id="nav-insights"
+                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+              >
+                Insights
+              </.link>
+
               <%!-- One place decides who sees the management link, and it is the
                     same predicate the Catalog context authorizes creation with,
                     so the nav can never advertise an area the context would

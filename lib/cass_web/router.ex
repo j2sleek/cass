@@ -11,6 +11,7 @@ defmodule CassWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug :fetch_current_scope_for_user
+    plug CassWeb.Plugs.TrackPageView
   end
 
   pipeline :api do
@@ -77,6 +78,17 @@ defmodule CassWeb.Router do
       live "/manage/products", ProductManagementLive, :index
       live "/manage/products/new", ProductManagementLive, :new
       live "/manage/products/:id/edit", ProductManagementLive, :edit
+    end
+  end
+
+  ## Admins only: the analytics and insights dashboard.
+
+  scope "/", CassWeb do
+    pipe_through [:browser, :require_admin_user]
+
+    live_session :require_admin,
+      on_mount: [{CassWeb.UserAuth, :require_admin}] do
+      live "/insights", InsightsLive
     end
   end
 

@@ -49,6 +49,29 @@ defmodule CassWeb.ProductLive do
   end
 
   @impl true
+  def handle_params(_params, _uri, socket) do
+    # Counted once per rendered product page (the `connected?/1` guard drops the
+    # dead render). This covers both a direct landing and in-app navigation to a
+    # product, since `handle_params/3` runs on every LiveView navigation.
+    if connected?(socket) and socket.assigns[:product] do
+      product = socket.assigns.product
+
+      CassWeb.LiveAnalytics.track(socket, "product_view",
+        path: ~p"/catalog/products/#{product.slug}",
+        subject_type: "product",
+        subject_id: product.id,
+        metadata: %{
+          "title" => product.name,
+          "product_type" => product.product_type,
+          "category" => product.category.name
+        }
+      )
+    end
+
+    {:noreply, socket}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
