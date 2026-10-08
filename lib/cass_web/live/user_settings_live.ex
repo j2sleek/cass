@@ -30,7 +30,7 @@ defmodule CassWeb.UserSettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/users/settings"}>
       <div class="mx-auto w-full max-w-2xl space-y-8">
         <.header>
           Account settings

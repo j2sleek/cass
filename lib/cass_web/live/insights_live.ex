@@ -36,7 +36,7 @@ defmodule CassWeb.InsightsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/insights"}>
       <section class="border-b border-zinc-200/70 pb-8 dark:border-white/10">
         <div class="flex flex-wrap items-end justify-between gap-4">
           <div>

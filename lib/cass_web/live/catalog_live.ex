@@ -155,7 +155,7 @@ defmodule CassWeb.CatalogLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/catalog"}>
       <section class="border-b border-zinc-200/70 pb-10 dark:border-white/10">
         <h1 class="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl dark:text-white">
           Catalog

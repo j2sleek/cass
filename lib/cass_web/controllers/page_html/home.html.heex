@@ -377,7 +377,7 @@
 
   <footer
     id="about"
-    class="scroll-mt-20 border-t border-zinc-200/70 bg-zinc-50/70 dark:border-white/10 dark:bg-white/[0.02]"
+    class="scroll-mt-20 border-t border-zinc-200/70 bg-zinc-50/70 pb-24 md:pb-16 dark:border-white/10 dark:bg-white/[0.02]"
     aria-labelledby="footer-heading"
   >
     <div class="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
@@ -466,4 +466,6 @@
       </div>
     </div>
   </footer>
+
+  <Layouts.bottom_nav current_path={~p"/"} current_scope={@current_scope} />
 </div>

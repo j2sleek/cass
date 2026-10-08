@@ -65,6 +65,11 @@ defmodule CassWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://phoenix.hexdocs.pm/scopes.html)"
 
+  attr :current_path, :string,
+    default: nil,
+    doc:
+      "the path to treat as current for active-tab highlighting. It does not have to be the exact request path: each page passes the tab it belongs to (e.g. a product page passes the catalog path)."
+
   slot :inner_block, required: true
 
   def app(assigns) do
@@ -159,14 +164,107 @@ defmodule CassWeb.Layouts do
         </div>
       </header>
 
-      <main class="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <main class="mx-auto w-full max-w-6xl px-4 pt-10 pb-28 sm:px-6 md:pb-10 lg:px-8">
         {render_slot(@inner_block)}
       </main>
+
+      <Layouts.bottom_nav current_path={@current_path} current_scope={@current_scope} />
 
       <Layouts.flash_group flash={@flash} />
     </div>
     """
   end
+
+  @doc """
+  Renders the mobile bottom tab bar.
+
+  Shown below the `md` breakpoint — the desktop header owns navigation on `md+`
+  — so the app shell stays as light as it was while every tab stays reachable
+  with one thumb. Tabs are real navigations, the active one carries
+  `aria-current="page"`, and links are full-height (`h-14`) so the whole
+  touch-target guideline holds.
+
+  The extra bottom padding on `main` in `app/1` keeps page content clear of the
+  fixed bar, and the bar itself pads for the iOS home indicator via
+  `env(safe-area-inset-bottom)`.
+
+  ## Examples
+
+      <Layouts.bottom_nav current_path={~p"/catalog"} current_scope={@current_scope} />
+
+  """
+  attr :current_path, :string, default: nil
+
+  attr :current_scope, :map,
+    default: nil,
+    doc: "the current scope; decides which tabs exist for guests vs. signed-in accounts"
+
+  def bottom_nav(assigns) do
+    ~H"""
+    <nav
+      aria-label="Primary mobile"
+      class="fixed inset-x-0 bottom-0 z-40 flex border-t border-zinc-200/70 bg-white/90 pb-[env(safe-area-inset-bottom)] shadow-[0_-1px_0_0_rgb(228_228_231_/_0.7)] backdrop-blur md:hidden dark:border-white/10 dark:bg-[#0b0b14]/90 dark:shadow-[0_-1px_0_0_rgb(255_255_255_/_0.1)]"
+    >
+      <%= for {key, label, path, icon} <- bottom_tabs(@current_scope) do %>
+        <.link
+          navigate={path}
+          id={"tab-#{key}"}
+          aria-current={if active_tab?(@current_path, key), do: "page", else: nil}
+          class={[
+            "flex h-14 flex-1 min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-brand-700 active:scale-95",
+            "dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-brand-300",
+            active_tab?(@current_path, key) && "font-semibold text-brand-700 dark:text-brand-300"
+          ]}
+        >
+          <.icon name={icon} class="size-5" />
+          <span class="text-[0.65rem] leading-none font-medium">{label}</span>
+        </.link>
+      <% end %>
+    </nav>
+    """
+  end
+
+  # Returns the bottom-nav tabs for `scope`: four for a guest (Home, Catalog, Log
+  # in, Join) and four for a signed-in account (Home, Catalog, Orders, Account).
+  # Favorites joins the signed-in bar when the favorites milestone lands.
+  # Platform-owned tools (Insights, product management) and shareable public deep
+  # links stay reachable from the header and footer on desktop.
+  defp bottom_tabs(%Scope{user: %Cass.Accounts.User{}}) do
+    [
+      {:home, "Home", ~p"/", "hero-home"},
+      {:catalog, "Catalog", ~p"/catalog", "hero-squares-2x2"},
+      {:orders, "Orders", ~p"/orders", "hero-shopping-bag"},
+      {:settings, "Account", ~p"/users/settings", "hero-user"}
+    ]
+  end
+
+  defp bottom_tabs(_scope) do
+    [
+      {:home, "Home", ~p"/", "hero-home"},
+      {:catalog, "Catalog", ~p"/catalog", "hero-squares-2x2"},
+      {:login, "Log in", ~p"/users/log-in", "hero-user"},
+      {:register, "Join", ~p"/users/register", "hero-sparkles"}
+    ]
+  end
+
+  # The active-tab test. Catalog and orders match by prefix so a detail page (a
+  # product, an order) keeps its section highlighted; account pages match
+  # exactly so a guest mid-signup is never told it is inside a tab it already
+  # left. Unknown paths simply highlight nothing.
+  defp active_tab?(current_path, key) when is_binary(current_path) do
+    case key do
+      :home -> current_path == "/"
+      :catalog -> String.starts_with?(current_path, "/catalog")
+      :favorites -> current_path == "/favorites"
+      :orders -> String.starts_with?(current_path, "/orders")
+      :login -> current_path == "/users/log-in"
+      :register -> current_path == "/users/register"
+      :settings -> current_path == "/users/settings"
+      _other -> false
+    end
+  end
+
+  defp active_tab?(_current_path, _key), do: false
 
   @doc """
   Shows the flash group with standard titles and content.

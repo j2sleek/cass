@@ -24,7 +24,7 @@ defmodule CassWeb.UserRegistrationLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/users/register"}>
       <.auth_card id="registration-card">
         <:title>Create your account</:title>
         <:subtitle>

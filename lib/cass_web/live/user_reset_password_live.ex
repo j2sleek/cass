@@ -17,7 +17,7 @@ defmodule CassWeb.UserResetPasswordLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
+    <Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/users/log-in"}>
       <.auth_card id="reset-password-card">
         <:title>Choose a new password</:title>
         <:subtitle>
