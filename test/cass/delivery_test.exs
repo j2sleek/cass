@@ -52,6 +52,9 @@ defmodule Cass.DeliveryTest do
       # A service is delivered by a human, and that mapping is owned by
       # Fulfillment rather than restated here.
       assert Delivery.kind_for(:service) == :manual
+      # A physical good is delivered by shipping, and that mapping is likewise
+      # owned by Fulfillment rather than restated here.
+      assert Delivery.kind_for(:physical) == :shipping
     end
 
     test "a kind is not a mechanism: only resolved kinds are handable" do
@@ -65,6 +68,9 @@ defmodule Cass.DeliveryTest do
       # placeholder capability.
       assert Delivery.mechanism_for(:smm) == nil
       assert Delivery.mechanism_for(:manual) == nil
+      # A shipping kind is deliberately never exercisable in-app: the parcel is
+      # handed over, not a capability minted.
+      assert Delivery.mechanism_for(:shipping) == nil
       assert Delivery.mechanism_for(:nonsense) == nil
     end
   end

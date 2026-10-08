@@ -7,7 +7,8 @@ defmodule Cass.Fulfillment.Fulfillment do
   (`Cass.Fulfillment.create_for_paid_order/1`) and is deliberately *not* a copy
   of the order: it is one row per purchased line, because a single order may mix
   a digital product (`:digital`), an SMM order (`:smm`), an AI plan (`:ai`),
-  and a human-performed service (`:manual`).
+  and a human-performed service (`:manual`), a shipped parcel (`:shipping`), or
+  a mix of all of them in one order.
 
   ## What it records
 
@@ -63,8 +64,8 @@ defmodule Cass.Fulfillment.Fulfillment do
   alias Cass.Entitlements.Entitlement
   alias Cass.Orders.{Order, OrderItem}
 
-  @kinds [:digital, :smm, :ai, :manual]
-  @product_types [:digital, :smm, :ai, :service]
+  @kinds [:digital, :smm, :ai, :manual, :shipping]
+  @product_types [:digital, :smm, :ai, :service, :physical]
   @statuses [:pending, :processing, :fulfilled, :failed, :cancelled]
 
   @transitions %{

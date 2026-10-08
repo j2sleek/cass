@@ -10,14 +10,8 @@ defmodule CassWeb.ProductLive do
   use CassWeb, :live_view
 
   alias Cass.Accounts.Scope
+  alias Cass.Catalog.ProductType
   alias CassWeb.{Metadata, NotFound}
-
-  @product_type_labels %{
-    digital: "Digital",
-    smm: "SMM",
-    ai: "AI",
-    service: "Service"
-  }
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -151,6 +145,12 @@ defmodule CassWeb.ProductLive do
                   </dd>
                 </div>
                 <div class="flex items-center justify-between gap-4">
+                  <dt class="text-zinc-500 dark:text-zinc-400">Delivery</dt>
+                  <dd class="text-zinc-700 dark:text-zinc-200">
+                    {ProductType.delivery_hint(@product.product_type)}
+                  </dd>
+                </div>
+                <div class="flex items-center justify-between gap-4">
                   <dt class="text-zinc-500 dark:text-zinc-400">Published</dt>
                   <dd class="text-zinc-700 dark:text-zinc-200">
                     {format_date(@product.published_at)}
@@ -273,7 +273,7 @@ defmodule CassWeb.ProductLive do
     """
   end
 
-  defp product_type_label(product_type), do: Map.fetch!(@product_type_labels, product_type)
+  defp product_type_label(product_type), do: ProductType.label(product_type)
 
   defp robots(:unlisted), do: "noindex, follow"
   defp robots(_visibility), do: nil

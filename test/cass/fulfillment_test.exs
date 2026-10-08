@@ -25,6 +25,7 @@ defmodule Cass.FulfillmentTest do
       assert Fulfillment.kind_for(:smm) == :smm
       assert Fulfillment.kind_for(:ai) == :ai
       assert Fulfillment.kind_for(:service) == :manual
+      assert Fulfillment.kind_for(:physical) == :shipping
     end
 
     test "accepts a product and reads its product type" do
@@ -42,6 +43,28 @@ defmodule Cass.FulfillmentTest do
       for product_type <- Cass.Catalog.product_types() do
         assert Fulfillment.kind_for(product_type) in kinds
       end
+    end
+
+    test "the closed vocabularies include the physical / shipping extension" do
+      assert :physical in Cass.Catalog.product_types()
+      assert :shipping in Fulfillment.kinds()
+    end
+
+    test "grants_entitlement?/1 is true for every kind except :shipping" do
+      assert Fulfillment.grants_entitlement?(:digital)
+      assert Fulfillment.grants_entitlement?(:smm)
+      assert Fulfillment.grants_entitlement?(:ai)
+      assert Fulfillment.grants_entitlement?(:manual)
+      refute Fulfillment.grants_entitlement?(:shipping)
+    end
+
+    test "entitlement_kinds/0 is the exact set grants_entitlement?/1 admits" do
+      for kind <- Fulfillment.kinds() do
+        assert Fulfillment.grants_entitlement?(kind) ==
+                 kind in Fulfillment.entitlement_kinds()
+      end
+
+      refute :shipping in Fulfillment.entitlement_kinds()
     end
   end
 
@@ -307,6 +330,29 @@ defmodule Cass.FulfillmentTest do
       assert entitlement.status == :active
       assert entitlement.fulfillment_id == fulfillment.id
       assert entitlement.order_item_id == fulfillment.order_item_id
+    end
+
+    test "a physical delivery completes without granting an entitlement", %{category: category} do
+      buyer = Scope.for_user(user_fixture())
+      {_product, variant} = published_variant_fixture(category, product_type: :physical)
+      order = paid_order_fixture(buyer, variant)
+
+      {:ok, [fulfillment]} = Fulfillment.create_for_paid_order(order)
+      assert fulfillment.kind == :shipping
+      assert fulfillment.product_type == :physical
+      assert Repo.aggregate(Entitlement, :count) == 0
+
+      {:ok, claimed} = Fulfillment.mark_processing(fulfillment)
+      assert {:ok, delivered} = Fulfillment.mark_fulfilled(claimed)
+      assert delivered.status == :fulfilled
+      assert delivered.delivered_at != nil
+
+      # Handing over a parcel grants nothing in the application, so completing
+      # the delivery — even twice — mints no entitlement.
+      assert Repo.aggregate(Entitlement, :count) == 0
+      assert {:ok, again} = Fulfillment.mark_fulfilled(delivered)
+      assert again.status == :fulfilled
+      assert Repo.aggregate(Entitlement, :count) == 0
     end
 
     test "claiming is idempotent", %{fulfillment: fulfillment} do

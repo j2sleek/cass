@@ -62,6 +62,7 @@ defmodule Cass.Fulfillment do
     * `:smm`     → automated delivery through a provider API
     * `:ai`      → entitlement/credits issued through the Nexus AI Gateway
     * `:service` → manual fulfillment by a human
+    * `:physical` → a parcel shipped to the buyer (the `:shipping` kind)
 
   The resolved `kind` is stored on the fulfillment, so a delivery worker can
   dispatch on it with one query and a later catalog edit cannot rewrite how a
@@ -105,7 +106,8 @@ defmodule Cass.Fulfillment do
     digital: :digital,
     smm: :smm,
     ai: :ai,
-    service: :manual
+    service: :manual,
+    physical: :shipping
   }
 
   @doc "Returns the closed vocabulary of delivery kinds."
@@ -128,9 +130,10 @@ defmodule Cass.Fulfillment do
 
   A delivery is only automated when `Cass.Delivery.mechanism_for/1` reports a
   mechanism for its kind — the same function that decides whether a buyer can
-  ever exercise a grant. `:digital` and `:ai` both qualify today; `:smm` and
-  `:manual` (a `:service` purchase) do not, and are therefore left `:pending`
-  for a human until their integration exists.
+  ever exercise a grant. `:digital` and `:ai` both qualify today; `:smm`,
+  `:manual` (a `:service` purchase), and `:shipping` (a physical parcel) do not,
+  and are therefore left `:pending` for a human or a future integration until
+  their mechanism exists.
 
   This is the eligibility authority for `Cass.Fulfillment.Worker`: a job for a
   kind outside this list is refused rather than "delivered" by a no-op, so a
@@ -155,6 +158,9 @@ defmodule Cass.Fulfillment do
       false
 
       iex> Cass.Fulfillment.automatable?(:manual)
+      false
+
+      iex> Cass.Fulfillment.automatable?(:shipping)
       false
   """
   def automatable?(kind) do
@@ -223,10 +229,36 @@ defmodule Cass.Fulfillment do
   end
 
   def kind_for(product_type)
-      when product_type in [:digital, :smm, :ai, :service],
+      when product_type in [:digital, :smm, :ai, :service, :physical],
       do: Map.fetch!(@kind_by_type, product_type)
 
   def kind_for(_product_type), do: :manual
+
+  @doc """
+  Returns the delivery kinds whose completion grants the buyer an entitlement.
+
+  A grant is a durable, in-app authorization to *use* what was bought — a
+  download, an access code, AI credits, or a service. A `:shipping` delivery is
+  a physical parcel: once it is handed over there is nothing in the application
+  for the buyer to exercise, so it reaches `:fulfilled` and records
+  `delivered_at` **without** minting an entitlement. That keeps "an entitlement
+  means the buyer can use something here" true for every row in
+  `cass_entitlements`.
+  """
+  def entitlement_kinds, do: [:digital, :smm, :ai, :manual]
+
+  @doc """
+  Returns true when reaching `:fulfilled` for `kind` grants an entitlement.
+
+  ## Examples
+
+      iex> Cass.Fulfillment.grants_entitlement?(:digital)
+      true
+
+      iex> Cass.Fulfillment.grants_entitlement?(:shipping)
+      false
+  """
+  def grants_entitlement?(kind), do: kind in entitlement_kinds()
 
   @doc """
   Creates the deliveries an authoritative **paid** order still owes.
@@ -295,13 +327,17 @@ defmodule Cass.Fulfillment do
   Transitions a delivery to `:fulfilled` and grants the buyer's entitlement.
 
   Both writes happen in one transaction, in this order: the delivery is reported
-  complete, and the entitlement is granted for the purchase it delivered. So:
+  complete, and — for every kind whose completion implies a durable in-app grant
+  (see `grants_entitlement?/1`) — the entitlement is granted for the purchase it
+  delivered. So:
 
     * an entitlement never exists for a delivery that was not established (the
       grant rolls back with the transition);
-    * a delivery is never reported complete without the grant it implies;
+    * a delivery that grants is never reported complete without its grant;
     * a retry or a concurrent duplicate grants nothing extra — the unique index
-      on `cass_entitlements.order_item_id` returns the existing grant.
+      on `cass_entitlements.order_item_id` returns the existing grant;
+    * a `:shipping` delivery records `delivered_at` and completes with **no**
+      entitlement, because a physical parcel has no in-app capability to grant.
 
   For an **`:ai`** delivery a third write happens in that same transaction: the
   credit pool the grant implies (`Cass.Ai.issue_credits/1`). It is in the
@@ -327,11 +363,7 @@ defmodule Cass.Fulfillment do
                delivered_at: utc_now()
              }),
            {:ok, fulfilled} <- reload_with_order_item(id) do
-        with {:ok, entitlement} <-
-               Entitlements.grant_for_fulfillment(fulfilled, fulfilled.order_item),
-             {:ok, _balance} <- Ai.issue_credits(entitlement) do
-          {:ok, fulfilled}
-        end
+        grant_or_complete(fulfilled)
       else
         {:error, _} = refusal -> resolve_race(refusal, id, :fulfilled)
       end
@@ -339,6 +371,22 @@ defmodule Cass.Fulfillment do
   end
 
   def mark_fulfilled(%Fulfillment{}), do: refuse(@invalid_transition)
+
+  # A physical (`:shipping`) delivery completes without an entitlement: once the
+  # parcel is handed over there is nothing in the application for the buyer to
+  # exercise, so no grant is minted. Every other kind grants the purchase and,
+  # for `:ai`, issues its credits in the same transaction.
+  defp grant_or_complete(%Fulfillment{kind: kind} = fulfilled) do
+    if grants_entitlement?(kind) do
+      with {:ok, entitlement} <-
+             Entitlements.grant_for_fulfillment(fulfilled, fulfilled.order_item),
+           {:ok, _balance} <- Ai.issue_credits(entitlement) do
+        {:ok, fulfilled}
+      end
+    else
+      {:ok, fulfilled}
+    end
+  end
 
   # A guarded transition can lose a race with a concurrent worker that already
   # reached the same status. That is a success, not a refusal: the caller asked

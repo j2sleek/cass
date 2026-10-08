@@ -93,6 +93,7 @@ defmodule Cass.Delivery do
       smm     → automated delivery through a provider API
       ai      → entitlement/credits issued through the AI gateway
       manual  → fulfillment performed by a human
+      shipping → a physical parcel handed to a carrier
 
   ## Mechanisms: the contract is established, two are implemented
 
@@ -106,6 +107,7 @@ defmodule Cass.Delivery do
       :ai      → :ai_gateway   (implemented)
       :smm     → not yet exercisable
       :manual  → not yet exercisable
+      :shipping → not exercisable in-app (a physical parcel has no access code)
 
   The unimplemented kinds refuse access rather than inventing a placeholder
   capability. Each is a small, local addition to `mechanism_for/1` plus its
@@ -224,7 +226,7 @@ defmodule Cass.Delivery do
   """
   def mechanism_for(:digital), do: :access_code
   def mechanism_for(:ai), do: :ai_gateway
-  def mechanism_for(kind) when kind in [:smm, :manual], do: nil
+  def mechanism_for(kind) when kind in [:smm, :manual, :shipping], do: nil
   def mechanism_for(_kind), do: nil
 
   @doc """

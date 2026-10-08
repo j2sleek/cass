@@ -115,10 +115,20 @@ follow-up milestones 6–7):
   never expose pricing of hidden variants.
 * **`Cass.Fulfillment` is a boundary, not a subsystem.** It maps a product type
   to a fulfillment kind via `kind_for/1` (`:digital`, `:smm`, `:ai`,
-  `:manual` for services, defaulting to `:manual` for anything unknown) so
+  `:manual` for services, `:shipping` for physical goods, defaulting to
+  `:manual` for anything unknown) so
   future checkout code can branch without touching product internals. There is
   deliberately **no** fulfillment table, provider, or integration in this
   milestone.
+
+> **Physical goods (delivery seam).** The product-type vocabulary has carried
+> `physical` from the start, and `kind_for/1` maps it to `:shipping`. A
+> `:shipping` delivery is not automatable (`Delivery.mechanism_for/1` answers
+> `nil`) and — unlike every other kind — reaching `:fulfilled` grants **no**
+> entitlement (`Fulfillment.grants_entitlement?/1`), because a handed-over
+> parcel has no in-app capability. Shipping-rate calculation, address capture,
+> and carrier integrations are later milestones; this seam only fixes the branch
+> so they need no rewrite.
 
 ## Orders and checkout foundation (Milestone 5)
 
@@ -259,7 +269,7 @@ Every arrow is a foreign key, so no row can exist without the one it depends on.
   `cancelled`) mirrored by a DB CHECK and an explicit transition map
   (`pending → processing → fulfilled`, `pending|processing → failed|cancelled`,
   `failed → processing|cancelled`; `:fulfilled` and `:cancelled` are terminal).
-  `kind` (`:digital | :smm | :ai | :manual`) is resolved once from the
+  `kind` (`:digital | :smm | :ai | :manual | :shipping`) is resolved once from the
   purchased variant's product type through a single narrow Catalog read —
   `Catalog.get_product_type_for_variant/1`, a projection that keeps delivery
   knowledge out of the Catalog and Catalog knowledge out of delivery — and
@@ -358,13 +368,14 @@ hand-off — without touching an ownership, expiry, or purchase-history fact.
 * **A kind is not a mechanism.** `Cass.Fulfillment.kind` remains the single
   taxonomy, and `Delivery.kinds/0` and `kind_for/1` delegate to it rather than
   restating it. `mechanism_for/1` is the one extension point, and the
-  distinction keeps the milestone honest: the vocabulary covers the
-  marketplace's four product categories, while exactly one is exercisable.
+  distinction keeps the milestone honest: the vocabulary covers every product
+  type, while only the kinds whose mechanism exists can be exercised.
 
-      :digital → :access_code  (implemented)
-      :smm     → not yet exercisable
-      :ai      → not yet exercisable
-      :manual  → not yet exercisable
+      :digital  → :access_code  (implemented)
+      :ai       → :ai_gateway   (implemented)
+      :smm      → not yet exercisable
+      :manual   → not yet exercisable
+      :shipping → not exercisable in-app (a physical parcel has no access code)
 
   The unimplemented kinds **refuse** rather than inventing a placeholder
   capability, so a `:smm` buyer is told the purchase cannot be accessed today

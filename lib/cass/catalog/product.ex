@@ -3,8 +3,8 @@ defmodule Cass.Catalog.Product do
   An item offered in the marketplace catalog.
 
   Everything sold on CASS is a Product. A product always belongs to a category
-  and represents one of four product types: `digital`, `smm`, `ai`, or
-  `service`. The type does not change the fundamental shape of a product; it
+  and represents one of five product types: `digital`, `smm`, `ai`, `service`,
+  or `physical`. The type does not change the fundamental shape of a product; it
   selects validation, presentation, purchasing configuration (through
   `Cass.Catalog.ProductVariant`), and fulfillment behavior
   (`Cass.Fulfillment`).
@@ -31,7 +31,7 @@ defmodule Cass.Catalog.Product do
     * `owner_id == <user id>` — the product belongs to that account, which may
       manage it along with admins.
 
-  Ownership is independent of `product_type`: any of the four product types
+  Ownership is independent of `product_type`: any of the five product types
   may be platform-owned or owned by a user. It is also independent of
   `Cass.Accounts` roles: `:vendor` and `:admin` grant the *capability* to own
   and manage, while `owner_id` records *whose* product it is. A plain customer
@@ -47,7 +47,7 @@ defmodule Cass.Catalog.Product do
   schema "cass_products" do
     field :name, :string
     field :slug, :string
-    field :product_type, Ecto.Enum, values: [:digital, :smm, :ai, :service]
+    field :product_type, Ecto.Enum, values: [:digital, :smm, :ai, :service, :physical]
     field :status, Ecto.Enum, values: [:draft, :published, :archived], default: :draft
     field :visibility, Ecto.Enum, values: [:public, :unlisted, :private], default: :private
     field :featured, :boolean, default: false

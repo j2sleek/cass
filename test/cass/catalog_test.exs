@@ -148,7 +148,7 @@ defmodule Cass.CatalogTest do
 
   describe "product types" do
     test "product_types/0 is the closed vocabulary of the marketplace" do
-      assert Catalog.product_types() == [:digital, :smm, :ai, :service]
+      assert Catalog.product_types() == [:digital, :smm, :ai, :service, :physical]
     end
 
     test "every product type is accepted", %{admin_scope: admin_scope} do

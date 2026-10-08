@@ -35,7 +35,8 @@ defmodule CassWeb.ProductManagementLive do
     {"Digital", "digital"},
     {"SMM", "smm"},
     {"AI", "ai"},
-    {"Service", "service"}
+    {"Service", "service"},
+    {"Physical", "physical"}
   ]
 
   @visibilities [

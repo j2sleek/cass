@@ -53,7 +53,7 @@ defmodule Cass.Entitlements.Entitlement do
   def statuses, do: @statuses
 
   schema "cass_entitlements" do
-    field :product_type, Ecto.Enum, values: [:digital, :smm, :ai, :service]
+    field :product_type, Ecto.Enum, values: [:digital, :smm, :ai, :service, :physical]
     field :product_name, :string
     field :variant_name, :string
     field :sku, :string

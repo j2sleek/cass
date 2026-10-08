@@ -2,7 +2,7 @@
 
 Current status: **Milestone 7 — post-payment delivery exists.** Everything sold
 on CASS is a `Product`, priced and stocked at the **product variant** level,
-with a closed product-type vocabulary (`digital | smm | ai | service`). Orders
+with a closed product-type vocabulary (`digital | smm | ai | service | physical`). Orders
 snapshot what was bought (names, SKU, price, currency, quantity, config) and
 reserve stock atomically; a captured payment moves the order to `:paid`; and a
 paid order now owes one **delivery per purchased line**
@@ -15,6 +15,28 @@ tables, `cass_orders`/`cass_order_items`, `cass_payments`,
 `cass_user_roles`, owned by the `Cass.Catalog`, `Cass.Orders`, `Cass.Payments`,
 `Cass.Fulfillment`, `Cass.Entitlements`, `Cass.Ai`, `Cass.Analytics`, and
 `Cass.Accounts` contexts. Vendor payouts arrive in later milestones.
+
+### The physical extension (delivery seam)
+
+The product-type vocabulary already carries the seam physical goods need, so a
+later shipping milestone needs no rewrite:
+
+* `physical` joins `digital | smm | ai | service` in `cass_products.product_type`
+  and in the two snapshot tables (`cass_fulfillments.product_type`,
+  `cass_entitlements.product_type`).
+* `Cass.Fulfillment.kind_for(:physical)` resolves to the `shipping` delivery
+  kind, which joins `cass_fulfillments.kind`. Like `:smm`/`:manual`, a
+  `:shipping` delivery is **not automatable** (`Cass.Delivery.mechanism_for/1`
+  answers `nil` for it) and is left `:pending` for a future shipping integration
+  or a human.
+* Uniquely, reaching `:fulfilled` for a `:shipping` delivery grants **no
+  entitlement**: a handed-over parcel has nothing in the application for the
+  buyer to exercise. `Cass.Fulfillment.grants_entitlement?/1` is the single
+  predicate that decides this, so every row in `cass_entitlements` still means
+  "the buyer can use something here".
+
+Shipping-rate calculation, address capture, and carrier integrations are later
+milestones; this seam only fixes the vocabulary and the delivery branch.
 
 ## Naming and conventions
 
@@ -58,7 +80,7 @@ duplicate sibling names regardless of case.
 | `category_id` | bigint      | FK `cass_categories` (`on_delete: :restrict`), required |
 | `slug`        | string      | Unique, lowercase `[a-z0-9]+(?:-[a-z0-9]+)*`, **immutable once published or archived** |
 | `name`        | string      | Required, not unique                      |
-| `product_type`| enum        | `digital` \| `smm` \| `ai` \| `service`   |
+| `product_type`| enum        | `digital` \| `smm` \| `ai` \| `service` \| `physical` |
 | `status`      | enum        | `draft` \| `published` \| `archived`      |
 | `visibility`  | enum        | `public` \| `unlisted` \| `private`       |
 | `featured`    | boolean     | Default `false`; showcase flag only, does not affect queries |
@@ -183,8 +205,8 @@ Indexes: **unique `order_item_id`**, `order_id`, `user_id`, `status`.
 * **`kind` is stored, never re-derived.** A delivery worker dispatches on it
   with one query, and a later catalog edit cannot rewrite how a past purchase
   must be delivered. The invariant `kind == Fulfillment.kind_for(product_type)`
-  is a domain rule (`:service → :manual`, unknown types → `:manual`) enforced
-  and tested in `Cass.Fulfillment`, not by the database.
+  is a domain rule (`:service → :manual`, `:physical → :shipping`, unknown types
+  → `:manual`) enforced and tested in `Cass.Fulfillment`, not by the database.
 * **`user_id` is not castable.** It is copied from the paid order inside
   `create_for_paid_order/1`, exactly like `orders.user_id`.
 * **The lifecycle is explicit.** `pending → processing → fulfilled`,
@@ -414,12 +436,13 @@ contexts use.
 * `published_at <= now` gates public queries (scheduled/future publishes are
   hidden until due).
 * **Product types (Milestone 4)** — `product_types/0` is the closed vocabulary
-  (`[:digital, :smm, :ai, :service]`), mirrored by
+  (`[:digital, :smm, :ai, :service, :physical]`), mirrored by
   `cass_products_product_type_check`. Adding or renaming a type is therefore a
   migration, not just a code change. The 2026-09-28 migration renamed the old
   values deterministically (`digital_product→digital`, `smm_service→smm`,
-  `ai_tool→ai`) and added `:service`; web labels/options derive from
-  `Cass.Catalog.product_types/0`.
+  `ai_tool→ai`) and added `:service`; a later migration added `:physical`
+  (with the `:shipping` fulfillment kind). Storefront labels and delivery hints
+  derive from `Cass.Catalog.ProductType`.
 * **Variants (Milestone 4)** — a variant is `purchasable?` when `active` and
   `stock` is not `0`. `price_cents` and `stock` are validated `>= 0`
   (`validate_number`, non-nil changes only); `config` must be a map with

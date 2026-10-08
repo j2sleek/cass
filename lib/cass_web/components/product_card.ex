@@ -8,12 +8,7 @@ defmodule CassWeb.ProductCard do
   """
   use CassWeb, :html
 
-  @product_type_labels %{
-    digital: "Digital",
-    smm: "SMM",
-    ai: "AI",
-    service: "Service"
-  }
+  alias Cass.Catalog.ProductType
 
   attr :product, :map, required: true
 
@@ -24,9 +19,14 @@ defmodule CassWeb.ProductCard do
         navigate={~p"/catalog/products/#{@product.slug}"}
         class="flex h-full flex-col items-start"
       >
-        <span class="rounded-full bg-accent-50 px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide text-accent-700 uppercase dark:bg-accent-500/10 dark:text-accent-300">
-          {product_type_label(@product.product_type)}
-        </span>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="rounded-full bg-accent-50 px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide text-accent-700 uppercase dark:bg-accent-500/10 dark:text-accent-300">
+            {ProductType.label(@product.product_type)}
+          </span>
+          <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[0.65rem] font-medium text-zinc-600 dark:bg-white/10 dark:text-zinc-300">
+            {ProductType.delivery_hint(@product.product_type)}
+          </span>
+        </div>
         <h3 class="mt-4 text-sm font-semibold tracking-tight text-zinc-900 group-hover:text-brand-700 dark:text-white dark:group-hover:text-brand-300">
           {@product.name}
         </h3>
@@ -54,8 +54,6 @@ defmodule CassWeb.ProductCard do
     </div>
     """
   end
-
-  defp product_type_label(product_type), do: Map.fetch!(@product_type_labels, product_type)
 
   # The lowest price across the active variants, prefixed with "From" when the
   # product offers more than one distinct price point.
