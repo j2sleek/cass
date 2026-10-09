@@ -422,6 +422,47 @@ hand-off — without touching an ownership, expiry, or purchase-history fact.
   `refuse/0`, and the web layer renders all of them as the same page, so a
   probe cannot learn whether an id exists, whose it was, or why it failed.
 
+## Saved items (favorites)
+
+* `Cass.Favorites` owns one table (`cass_favorites`) and one idea: the pair
+  `(user_id, product_id)`, a pin a signed-in account puts on a product it is
+  following. No price, note, position, or list of its own — a favorite is the
+  pair and nothing else, so the schema cannot grow a second meaning.
+* **The scope decides every id.** Each function takes `current_scope` and
+  copies `user_id` from `scope.user`; `product_id` comes from the product the
+  request already resolved. Neither is cast, requested, or readable from params,
+  so no request can pin or unpin on another account's behalf. A guest is not a
+  failure mode to defend against but an absence: reads answer `[]`/`false`,
+  `add_favorite/2` refuses with the same `:base` error shape used elsewhere,
+  and `remove_favorite/2` still answers `:ok`.
+* **Idempotent in both directions.** The composite unique index is the identity
+  of a pin, so a repeated save keeps one row and returns it, and removing a
+  product that was never saved is a no-op — every caller can fire the event it
+  means without checking first.
+* **Reading goes back through the catalog's public contract.**
+  `list_favorite_products/1` resolves ids with
+  `Cass.Catalog.list_public_products_by_ids/1`, which applies the same filter
+  as `get_public_product_by_slug/1` (published, publication due, `:active`
+  category, `:public`/`:unlisted` visibility). A product archived or made
+  `:private` after it was saved disappears from the list while the pin
+  survives, and the favorites query never probes a row the storefront would
+  refuse to show. Sorting is by `inserted_at`, so the newest pin leads without
+  a position column.
+* **Two surfaces, one toggle.** `CassWeb.ProductLive` renders
+  `#favorite-toggle` only when `Scope.authenticated?/1` (a guest sees no
+  control to click) and flips the pin in `handle_event("toggle-favorite", ...)`,
+  keeping a `:favorited?` assign for the label, icon, and `aria-pressed`.
+  `CassWeb.FavoritesLive` (`GET /favorites`, authenticated, `noindex`) lists the
+  pins newest first as a LiveView stream with a per-card remove control; the
+  product struct for an event or a `stream_delete/3` is held in an
+  `id => product` map assign beside the stream, because a stream is not
+  enumerable server-side.
+* **Both surfaces record `favorite_added` / `favorite_removed`** through
+  `CassWeb.LiveAnalytics.track/3`, so the `/insights` funnel sees retention
+  alongside product views. The signed-in bottom tab bar carries a `Favorites`
+  tab (Home, Catalog, Favorites, Orders, Account), while a guest's bar keeps
+  its four tabs and `/favorites` itself redirects to the login page.
+
 ## Accounts and current scope
 
 * `Cass.Accounts` owns `cass_users`, `cass_users_tokens`, `cass_user_roles`,

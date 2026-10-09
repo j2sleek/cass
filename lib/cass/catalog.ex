@@ -253,6 +253,28 @@ defmodule Cass.Catalog do
     |> Repo.all()
   end
 
+  @doc """
+  Returns the publicly reachable products whose ids are in `ids`.
+
+  The filtering contract mirrors `get_public_product_by_slug/1`: `:published`
+  status, publication due, an `:active` category, and `:public` or `:unlisted`
+  visibility — so a product that was saved while public keeps appearing even
+  if the seller later unlists it, while a draft, archived, or `:private`
+  product simply is not in the result. The public query never probes rows it
+  would refuse to show; favorites built on this can pin quiet products without
+  ever advertising them. Returns `[]` for an empty input, matching the shape
+  of the other public reads.
+  """
+  def list_public_products_by_ids([]), do: []
+
+  def list_public_products_by_ids(ids) when is_list(ids) do
+    Product
+    |> public_product_query()
+    |> where([p], p.visibility in [:public, :unlisted])
+    |> where([p], p.id in ^ids)
+    |> Repo.all()
+  end
+
   ## Discovery filters
   #
   # These are pure functions over an already-loaded list rather than query

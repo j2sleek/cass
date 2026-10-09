@@ -225,14 +225,15 @@ defmodule CassWeb.Layouts do
   end
 
   # Returns the bottom-nav tabs for `scope`: four for a guest (Home, Catalog, Log
-  # in, Join) and four for a signed-in account (Home, Catalog, Orders, Account).
-  # Favorites joins the signed-in bar when the favorites milestone lands.
-  # Platform-owned tools (Insights, product management) and shareable public deep
-  # links stay reachable from the header and footer on desktop.
+  # in, Join) and five for a signed-in account (Home, Catalog, Favorites,
+  # Orders, Account). Platform-owned tools (Insights, product management) and
+  # shareable public deep links stay reachable from the header and footer on
+  # desktop.
   defp bottom_tabs(%Scope{user: %Cass.Accounts.User{}}) do
     [
       {:home, "Home", ~p"/", "hero-home"},
       {:catalog, "Catalog", ~p"/catalog", "hero-squares-2x2"},
+      {:favorites, "Favorites", ~p"/favorites", "hero-heart"},
       {:orders, "Orders", ~p"/orders", "hero-shopping-bag"},
       {:settings, "Account", ~p"/users/settings", "hero-user"}
     ]

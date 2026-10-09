@@ -497,6 +497,63 @@ defmodule Cass.CatalogTest do
       {:ok, _} = Catalog.publish_product(admin_scope, private)
       assert Catalog.get_public_product_by_slug("private-item") == nil
     end
+
+    test "list_public_products_by_ids/1 answers [] for an empty list" do
+      assert Catalog.list_public_products_by_ids([]) == []
+    end
+
+    test "list_public_products_by_ids/1 applies the public contract by id", %{
+      product: product,
+      category: category,
+      admin_scope: admin_scope
+    } do
+      {:ok, unlisted} =
+        Catalog.create_product(category, %{
+          name: "Unlisted",
+          slug: "unlisted-item",
+          product_type: :ai,
+          visibility: :unlisted
+        })
+
+      {:ok, _} = Catalog.publish_product(admin_scope, unlisted)
+
+      {:ok, draft} =
+        Catalog.create_product(category, %{
+          name: "Draft",
+          slug: "draft-item",
+          product_type: :ai,
+          visibility: :public
+        })
+
+      {:ok, private} =
+        Catalog.create_product(category, %{
+          name: "Private",
+          slug: "private-item",
+          product_type: :ai,
+          visibility: :private
+        })
+
+      {:ok, _} = Catalog.publish_product(admin_scope, private)
+
+      {:ok, archived} =
+        Catalog.create_product(category, %{
+          name: "Archived",
+          slug: "archived-item",
+          product_type: :ai,
+          visibility: :public
+        })
+
+      {:ok, _} = Catalog.publish_product(admin_scope, archived)
+      {:ok, _} = Catalog.archive_product(admin_scope, archived)
+
+      # Every id the caller asks about — plus one that does not exist — through
+      # the same filter a direct lookup uses: only the publicly reachable
+      # product and the unlisted one come back.
+      ids = [product.id, unlisted.id, draft.id, private.id, archived.id, 0]
+
+      assert ids |> Catalog.list_public_products_by_ids() |> Enum.map(& &1.slug) |> Enum.sort() ==
+               ["public-product", "unlisted-item"]
+    end
   end
 
   describe "public product discovery controls" do

@@ -29,6 +29,10 @@ defmodule CassWeb.ProductLive do
         socket
         |> assign(:not_found, false)
         |> assign(:product, product)
+        |> assign(
+          :favorited?,
+          Cass.Favorites.favorited?(socket.assigns.current_scope, product.id)
+        )
         |> assign(:buy_form, build_buy_form(product.active_variants))
         |> assign(
           :default_sold_out?,
@@ -63,6 +67,41 @@ defmodule CassWeb.ProductLive do
     end
 
     {:noreply, socket}
+  end
+
+  # Flips the signed-in visitor's pin on this product. Guests cannot save: the
+  # button they see is only rendered for authenticated scopes (`Scope.authenticated?/1`),
+  # so this path is the guard of last resort, not the norm.
+  @impl true
+  def handle_event("toggle-favorite", _params, socket) do
+    scope = socket.assigns.current_scope
+    product = socket.assigns.product
+
+    if Scope.authenticated?(scope) do
+      currently = socket.assigns.favorited?
+
+      result =
+        if currently do
+          Cass.Favorites.remove_favorite(scope, product)
+        else
+          Cass.Favorites.add_favorite(scope, product)
+        end
+
+      case result do
+        {:ok, _favorite} ->
+          {:noreply,
+           socket |> assign(:favorited?, true) |> track_favorite("favorite_added", product)}
+
+        :ok ->
+          {:noreply,
+           socket |> assign(:favorited?, false) |> track_favorite("favorite_removed", product)}
+
+        {:error, _changeset} ->
+          {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -265,6 +304,32 @@ defmodule CassWeb.ProductLive do
                   This product has no purchase options yet — check back soon.
                 </div>
               <% end %>
+
+              <%= if Scope.authenticated?(@current_scope) do %>
+                <div class="mt-6 border-t border-zinc-100 pt-4 dark:border-white/10">
+                  <button
+                    id="favorite-toggle"
+                    type="button"
+                    phx-click="toggle-favorite"
+                    aria-pressed={to_string(@favorited?)}
+                    class={[
+                      "flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition active:scale-[0.99]",
+                      if(@favorited?,
+                        do:
+                          "border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20",
+                        else:
+                          "border-zinc-200 bg-white text-zinc-600 hover:border-brand-300 hover:text-brand-700 dark:border-white/15 dark:bg-white/5 dark:text-zinc-300 dark:hover:border-brand-500/40 dark:hover:text-brand-300"
+                      )
+                    ]}
+                  >
+                    <.icon
+                      name={if(@favorited?, do: "hero-heart-solid", else: "hero-heart")}
+                      class="size-4"
+                    />
+                    {if(@favorited?, do: "Saved to favorites", else: "Save to favorites")}
+                  </button>
+                </div>
+              <% end %>
             </div>
           </aside>
         </div>
@@ -321,6 +386,17 @@ defmodule CassWeb.ProductLive do
     dollars = div(cents, 100)
     remainder = rem(cents, 100) |> Integer.to_string() |> String.pad_leading(2, "0")
     "#{currency} #{dollars}.#{remainder}"
+  end
+
+  defp track_favorite(socket, name, product) do
+    CassWeb.LiveAnalytics.track(socket, name,
+      path: ~p"/catalog/products/#{product.slug}",
+      subject_type: "product",
+      subject_id: product.id,
+      metadata: %{"title" => product.name}
+    )
+
+    socket
   end
 
   defp ok(socket), do: {:ok, socket}

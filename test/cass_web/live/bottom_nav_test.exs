@@ -36,6 +36,7 @@ defmodule CassWeb.BottomNavTest do
 
     assert has_element?(view, "#tab-home")
     assert has_element?(view, "#tab-catalog")
+    assert has_element?(view, "#tab-favorites")
     assert has_element?(view, "#tab-orders")
     assert has_element?(view, "#tab-settings")
 

@@ -7,13 +7,14 @@ snapshot what was bought (names, SKU, price, currency, quantity, config) and
 reserve stock atomically; a captured payment moves the order to `:paid`; and a
 paid order now owes one **delivery per purchased line**
 (`cass_fulfillments`), whose completion grants the buyer a durable
-**entitlement** (`cass_entitlements`). Fourteen domain tables exist: the three catalog
+**entitlement** (`cass_entitlements`). Fifteen domain tables exist: the three catalog
 tables, `cass_orders`/`cass_order_items`, `cass_payments`,
 `cass_fulfillments`/`cass_entitlements`, the AI runtime tables
 (`cass_ai_runs`/`cass_ai_credit_balances`), the append-only analytics stream
-(`cass_analytics_events`), plus `cass_users`, `cass_users_tokens`, and
-`cass_user_roles`, owned by the `Cass.Catalog`, `Cass.Orders`, `Cass.Payments`,
-`Cass.Fulfillment`, `Cass.Entitlements`, `Cass.Ai`, `Cass.Analytics`, and
+(`cass_analytics_events`), the saved-items pair (`cass_favorites`), plus
+`cass_users`, `cass_users_tokens`, and `cass_user_roles`, owned by the
+`Cass.Catalog`, `Cass.Orders`, `Cass.Payments`, `Cass.Fulfillment`,
+`Cass.Entitlements`, `Cass.Ai`, `Cass.Analytics`, `Cass.Favorites`, and
 `Cass.Accounts` contexts. Vendor payouts arrive in later milestones.
 
 ### The physical extension (delivery seam)
@@ -285,6 +286,35 @@ The provider-facing state that a real object store, SMM API, or AI gateway will
 need is genuinely persistent, and `Cass.Fulfillment.Fulfillment` documents where
 it belongs: a delivery-attached table, added when the first provider needs it.
 
+### `cass_favorites` (saved items)
+
+The retention pin: one row per account per product it is following, and no
+fact about the product beyond the id.
+
+| Column       | Type        | Notes                                   |
+| ------------ | ----------- | --------------------------------------- |
+| `id`         | bigint      | PK                                      |
+| `user_id`    | bigint      | FK `cass_users` (`on_delete: :restrict`), required |
+| `product_id` | bigint      | FK `cass_products` (`on_delete: :restrict`), required |
+| `inserted_at` / `updated_at` | utc_datetime | `inserted_at` is the save time and orders the favorites list |
+
+Indexes: **unique `(user_id, product_id)`**, `product_id`.
+
+* **The unique pair *is* the pin.** Saving the same product twice is the same
+  pin, which is exactly what makes `Cass.Favorites.add_favorite/2` idempotent:
+  a second save finds the existing row instead of raising on the index. The
+  `product_id` index is the "who saved this product?" read a seller surface
+  will want, and it keeps un-saving fast.
+* **`on_delete: :restrict` on both foreign keys**, matching the marketplace's
+  rule that orders, entitlements, and now pins are protected history: the
+  database refuses to destroy an account that still has saved items or a
+  product that has been pinned. Products are archived rather than deleted, so
+  this is the same posture as `cass_orders` and `cass_entitlements`.
+* **Neither id is cast.** `Cass.Favorites.Favorite.changeset/2` casts nothing at
+  all: `user_id` is copied from the authenticated `Cass.Accounts.Scope` and
+  `product_id` from the product the request already resolved. No param can pin
+  (or unpin) something on another account's behalf.
+
 ### `cass_categories`
 
 #### `owner_id` (Milestone 3 Phase 3)
@@ -513,6 +543,29 @@ contexts use.
   the `mark_*` transitions, and `revoke_entitlement/2` take no scope and have no
   route in this milestone — the same posture as `Orders.mark_order_paid/1`. A
   request body can never name a `user_id`, an `order_item_id`, or a grant.
+
+### Saved items (favorites)
+
+* **The scope is the only authority on "whose".** Every `Cass.Favorites` read
+  and write takes a `Cass.Accounts.Scope`: `user_id` comes from
+  `scope.user.id`, never from params. A guest is not a special case to handle
+  but an absence of favorites — `list_favorite_products/1` and
+  `favorite_ids_for/1` answer `[]`, `favorited?/2` answers `false`,
+  `add_favorite/2` refuses with a `:base` error, and `remove_favorite/2` stays
+  a harmless `:ok`.
+* **Saving is idempotent, un-saving is a no-op.** Both operations are written
+  to be safely repeatable, so a double click, a retried request, or a stale
+  button state cannot create a second pin or fail on one that is already gone.
+* **Listing re-validates through the catalog's public contract.** A saved
+  product is read back with `Cass.Catalog.list_public_products_by_ids/1`, which
+  applies the same filter as `get_public_product_by_slug/1` — `published`
+  status with publication due, an `:active` category, `:public`/`:unlisted`
+  visibility. A product archived or made `:private` after it was saved drops
+  out of the list while the pin itself survives, so an un-archive brings it
+  back; the favorites query never probes a row the storefront would refuse to
+  serve.
+* **Most recently saved first**, ordered by `inserted_at` then `id`, so the
+  list has a stable order that needs no position column.
 
 ### Accounts
 
