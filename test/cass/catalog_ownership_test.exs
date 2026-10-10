@@ -16,6 +16,7 @@ defmodule Cass.Catalog.OwnershipTest do
   import Cass.AccountsFixtures
 
   alias Cass.Accounts.Scope
+  alias Cass.Accounts.User
   alias Cass.Catalog
   alias Cass.Catalog.Product
 
@@ -634,6 +635,47 @@ defmodule Cass.Catalog.OwnershipTest do
 
       assert Catalog.list_public_products() == []
       assert Catalog.get_public_product_by_slug("gone-widget") == nil
+    end
+  end
+
+  describe "owns_any_product?/1" do
+    test "is true for an account that owns a product, in any status", %{category: category} do
+      vendor = vendor_fixture()
+      scope = Scope.for_user(vendor)
+
+      refute Catalog.owns_any_product?(vendor)
+
+      draft = create_owned!(scope, category)
+      assert Catalog.owns_any_product?(vendor)
+
+      {:ok, published} = Catalog.publish_product(scope, draft)
+      assert Catalog.owns_any_product?(vendor)
+
+      {:ok, _archived} = Catalog.archive_product(scope, published)
+      assert Catalog.owns_any_product?(vendor)
+    end
+
+    test "is false for an account that owns nothing", %{category: category} do
+      create_owned!(scope_for(:vendor), category)
+
+      assert Catalog.owns_any_product?(vendor_fixture()) == false
+      assert Catalog.owns_any_product?(user_fixture()) == false
+      assert Catalog.owns_any_product?(admin_fixture()) == false
+    end
+
+    test "is false for a guest, nil, or a non-user", %{category: category} do
+      create_owned!(scope_for(:vendor), category)
+
+      assert Catalog.owns_any_product?(nil) == false
+      assert Catalog.owns_any_product?(%User{}) == false
+      assert Catalog.owns_any_product?("not a user") == false
+    end
+
+    test "a platform-owned product belongs to nobody", %{category: category} do
+      {:ok, _platform} = Catalog.create_product(category, attrs())
+
+      assert Catalog.owns_any_product?(vendor_fixture()) == false
+      assert Catalog.owns_any_product?(admin_fixture()) == false
     end
   end
 end

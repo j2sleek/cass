@@ -58,6 +58,10 @@ defmodule CassWeb.Router do
       live "/orders", OrdersLive, :index
       live "/orders/:id", OrdersLive, :show
       live "/favorites", FavoritesLive
+      # Vendor onboarding (Milestone 9): any signed-in account may apply. The
+      # page writes a profile; approving it — and granting the role — is an
+      # admin action on `/admin/vendors`.
+      live "/sell", VendorOnboardingLive
       # Delivery & access for one purchase (Milestone 8). The route is
       # authenticated; ownership and entitlement state are decided by
       # `Cass.Delivery.authorize_access/2`, never here.
@@ -90,6 +94,7 @@ defmodule CassWeb.Router do
     live_session :require_admin,
       on_mount: [{CassWeb.UserAuth, :require_admin}] do
       live "/insights", InsightsLive
+      live "/admin/vendors", AdminVendorsLive
     end
   end
 

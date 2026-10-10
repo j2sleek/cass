@@ -65,18 +65,28 @@ defmodule CassWeb.ProductCard do
     if length(prices) > 1, do: "From #{price}", else: price
   end
 
-  # Seller identity: a platform-owned product is sold by CASS itself; owned
-  # products show a handle derived from the seller's verified email.
+  # Seller identity: a platform-owned product is sold by CASS itself; an owned
+  # product shows the seller's approved vendor display name when they have one,
+  # and otherwise a handle derived from the seller's verified email.
   defp vendor_label(%{owner: nil}), do: "Sold by CASS"
 
-  defp vendor_label(%{owner: %{email: email}}) when is_binary(email) do
+  defp vendor_label(%{owner: %Cass.Accounts.User{} = owner}) do
+    case Cass.Vendors.public_name(owner) do
+      name when is_binary(name) -> "Sold by #{name}"
+      _other -> email_handle_label(owner.email)
+    end
+  end
+
+  defp vendor_label(_product), do: "Sold by CASS"
+
+  defp email_handle_label(email) when is_binary(email) do
     case String.split(email, "@", parts: 2) do
       [handle | _] when handle != "" -> "Sold by #{handle}"
       _ -> "Sold by CASS"
     end
   end
 
-  defp vendor_label(_product), do: "Sold by CASS"
+  defp email_handle_label(_email), do: "Sold by CASS"
 
   defp money(cents, currency) when is_integer(cents) do
     dollars = div(cents, 100)

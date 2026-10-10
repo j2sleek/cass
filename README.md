@@ -4,7 +4,7 @@ A unified marketplace for digital products, compliant social marketing
 services, and AI-powered tools, built with Elixir, Phoenix LiveView, and
 PostgreSQL.
 
-**Status: Milestone 8 (delivery and access for digital purchases).**
+**Status: Milestone 9 (sellers and the account lifecycle).**
 This release ships the server-rendered storefront catalog, a
 complete, session-based account system (registration with emailed confirmation,
 login with an optional 14-day remembered session, password reset, and account
@@ -26,9 +26,16 @@ snapshotted entitlement (`cass_entitlements`) when that delivery completes. A
 completed digital purchase is now **exercisable**: `Cass.Delivery` answers *how*
 the right is used, separately from the entitlement that proves it, and
 `/purchases/:id` shows the buyer their access code, reachable from their own
-order page. SMM/AI/manual delivery, real download infrastructure, vendor
-transfers, and AI features arrive in later milestones and are **not** available
-yet.
+order page. An account can now **become a seller**: `/sell` writes an onboarding
+application (a `cass_vendor_profiles` row), an admin approves or rejects it on
+`/admin/vendors` — approval is the one place that grants the `:vendor` role —
+and an approved seller's display name replaces the email-derived handle on the
+products they sell. Settings now manages **sessions** (list, revoke one, sign
+out everywhere) and offers **account deletion**, which is a soft,
+receipt-preserving deactivation that is refused while the account still owns a
+product. SMM/AI/manual delivery, real download infrastructure, vendor
+transfers/settlements, and AI features arrive in later milestones and are
+**not** available yet.
 
 ## Requirements
 
@@ -333,6 +340,49 @@ CASS_ADMIN_PASSWORD='...' mix cass.accounts.create_admin --email you@example.com
   why it failed. `/purchases/:id` is `noindex` and reachable from the buyer's own
   order page rather than from a listing or dashboard.
 
+### Sellers and the account lifecycle (Milestone 9)
+
+* **Applying grants nothing** — `Cass.Vendors` owns the seller profile
+  (`cass_vendor_profiles`, one optional row per account). Any signed-in account
+  can submit one at `/sell` via `save_profile/2`, which writes a `:pending`
+  profile and nothing else. It grants no role, is never shown publicly, and the
+  form cannot name a status or a target account: both are written
+  programmatically. See [docs/security.md](docs/security.md).
+* **The role, not the form, approves a seller** — the status is derived from the
+  caller's own roles. An account that already holds `:vendor` has its edits stay
+  `:approved`; everyone else is `:pending`, so editing a `:rejected` profile
+  resubmits it. Approval runs on the admin review surface `/admin/vendors`
+  through `Cass.Vendors.approve_profile/2`, which performs the status change and
+  the `:vendor` grant in **one transaction**, so a profile can never be
+  approved without the role that lets it act. That is still the only thing that
+  grants a role, and it names an application, never a role.
+* **Admin review is a context decision** — `list_profiles/1` and
+  `get_reviewable_profile/2` return `[]`/`nil` for a non-admin scope, so a
+  non-admin gets nothing even by calling the context directly or tampering with
+  an event id; the web layer renders the same non-enumerable refusal as the rest
+  of the management surfaces.
+* **One public seller identity** — `Cass.Vendors.public_name/1` returns the
+  `display_name` of an `:approved` profile or `nil`; the storefront's product
+  card uses it when present and otherwise falls back to the email-derived handle
+  it always used. The public product query preloads `owner: :vendor_profile`, and
+  no other profile field reaches the storefront.
+* **Deletion is a deactivation, not a hard delete** — orders, fulfillments,
+  entitlements, favorites, and roles all reference the account and must survive
+  as receipts, so `Cass.Accounts.delete_user/1` stamps `cass_users.deleted_at`
+  and, in the same transaction, replaces the email with a non-routable
+  `…@cass.invalid` placeholder, replaces the password hash with a random
+  secret, and deletes every token. A deleted account is refused at login and on
+  session resolution (`User.deleted?/1`, the token query). An account that still
+  **owns a product** is refused with `{:error, :owns_products}` until its
+  catalog is archived or transferred, so a seller's published work is never
+  silently orphaned.
+* **Sessions are managed by id, never by value** —
+  `Cass.Accounts.list_user_sessions/1`, `revoke_user_session/2`, and
+  `delete_user_sessions/1` let `/users/settings` list the account's sessions,
+  revoke one, or sign out everywhere. The per-session revoke scopes the delete
+  by `user_id`, so a caller cannot end another account's session by naming its
+  id, and the page shows the token's row id, never the token.
+
 ### Catalog (Milestone 2)
 
 * **Catalog domain** — `categories` and `products` tables (migrations in
@@ -377,16 +427,16 @@ See [docs/architecture.md](docs/architecture.md) for details.
 4. ~~Roles and authorization foundation (`:admin`/`:vendor`, guards)~~
 5. ~~Product ownership and ownership-safe management~~
 6. ~~Product-centric catalog (product types + variants; `:service` type)~~
-7. Vendor onboarding, admin dashboard, profile, and account deletion
-   (ownership *transfer* is deliberately deferred: deleting an account that
-   still owns products is refused by the database)
+7. ~~Vendor onboarding, admin vendor review, seller profile, session
+   management, and account deletion~~ (ownership *transfer* and settlements are
+   deliberately deferred: deleting an account that still owns products is
+   refused until its catalog is archived or transferred)
 8. ~~Checkout and order flow (order items consume variant pricing/stock)~~
 9. ~~Payments (capture `awaiting_payment` orders through Paystack, provider
    boundary designed so more gateways slot in)~~
 10. ~~Fulfillment (`Cass.Fulfillment`): a paid order owes one tracked delivery
     per purchased line, and completing one grants a durable
-    `Cass.Entitlements` grant~~ — plus vendor transfers/settlements and account
-    deletion end to end
+    `Cass.Entitlements` grant~~ — plus vendor transfers/settlements
 11. AI tools routed through the Nexus AI Gateway
 12. JSON catalog API under `/api/v1` (optional, additive)
 

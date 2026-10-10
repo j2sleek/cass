@@ -78,7 +78,7 @@ defmodule Cass.Catalog do
   """
   import Ecto.Query, warn: false
 
-  alias Cass.Accounts.Scope
+  alias Cass.Accounts.{Scope, User}
   alias Cass.Catalog.{Category, Product, ProductVariant}
   alias Cass.Repo
 
@@ -701,6 +701,25 @@ defmodule Cass.Catalog do
   def can_manage_product?(_scope, _product), do: false
 
   @doc """
+  Returns true when `user` owns at least one product, in any status.
+
+  This is the precondition `Cass.Accounts.delete_user/1` checks before
+  deactivating an account. A catalog is a seller's published work and must not be
+  silently orphaned, which is exactly why `cass_products.owner_id` is
+  `on_delete: :restrict`; because account deletion is a soft delete the foreign
+  key is never exercised, so the check has to be explicit here.
+
+  Archived and draft products count: ownership does not end when a product stops
+  being served. A non-user (or an unsaved one) owns nothing.
+  """
+  @spec owns_any_product?(User.t() | term()) :: boolean()
+  def owns_any_product?(%User{id: owner_id}) when is_integer(owner_id) do
+    Repo.exists?(from p in Product, where: p.owner_id == ^owner_id)
+  end
+
+  def owns_any_product?(_user), do: false
+
+  @doc """
   Returns the products `scope` is allowed to manage: every product for an admin,
   only the caller's own products for everybody else, and nothing for a guest.
   """
@@ -833,7 +852,7 @@ defmodule Cass.Catalog do
       where: p.status == :published,
       where: is_nil(p.published_at) or p.published_at <= ^now,
       preload: [
-        :owner,
+        owner: :vendor_profile,
         category: c,
         active_variants: ^public_variant_query()
       ]

@@ -2,11 +2,21 @@ defmodule Cass.Accounts.User do
   @moduledoc """
   A CASS account.
 
-  Milestone 3 Phase 2 added roles, and nothing else: an account is an email
-  address, the hashed password, and the confirmation timestamp, plus the roles
-  in `cass_user_roles` (see `Cass.Accounts.UserRole`). Ownership, vendor
-  profile fields, and every other later-phase column are still **not** part of
-  this model (see `docs/data-model.md`).
+  Milestone 3 Phase 2 added roles, and Milestone 9 added `deleted_at` (the
+  soft-deletion timestamp) and the `vendor_profile` association. An account is
+  still an email address, the hashed password, and the confirmation timestamp,
+  plus the roles in `cass_user_roles` (see `Cass.Accounts.UserRole`); the seller
+  profile itself lives in `cass_vendor_profiles` (see
+  `Cass.Vendors.VendorProfile`). Ownership is a fact about a product, not a
+  column here.
+
+  ## Deletion
+
+  An account is never hard-deleted: orders, entitlements, and favorites all
+  reference it and must survive as receipts. `deleted_at` marks a deactivated
+  account, which `Cass.Accounts.delete_user/1` also scrubs of credentials.
+  `deleted?/1` is the one predicate every lookup should gate on. See
+  `docs/data-model.md` and `docs/security.md`.
 
   ## Password hashing
 
@@ -54,11 +64,23 @@ defmodule Cass.Accounts.User do
     field :current_password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
+    field :deleted_at, :utc_datetime
 
     has_many :user_roles, Cass.Accounts.UserRole, foreign_key: :user_id
+    has_one :vendor_profile, Cass.Vendors.VendorProfile
 
     timestamps(type: :utc_datetime)
   end
+
+  @doc """
+  Returns true when the account has been deactivated.
+
+  A deleted account is refused at login and on session resolution, so this is
+  the predicate any call path that turns an account into a live session should
+  check.
+  """
+  def deleted?(%__MODULE__{deleted_at: nil}), do: false
+  def deleted?(%__MODULE__{}), do: true
 
   @doc """
   A user changeset for registering an account.

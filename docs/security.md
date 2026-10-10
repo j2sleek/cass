@@ -268,9 +268,12 @@ admin, and it is deliberately awkward:
   vocabulary, the storage, the scope, and the guards; the admin and vendor areas
   that will use them arrive in later phases. Nothing is exposed in the meantime,
   so there is no half-protected area to get wrong.
-* **No role management UI or API.** Granting a role is a console/CLI action on
-  purpose. An operator UI is a later decision, and it will need its own
-  authorization design (who may promote whom).
+* **No general role management UI or API.** Granting a role is still not
+  something a request can name. Since Milestone 9 an admin approves a vendor
+  application, which grants `:vendor` inside `Cass.Vendors.approve_profile/2`
+  by naming an *application*, never a role or an account. Promoting an arbitrary
+  account to an arbitrary role (including `:admin`) remains a console/CLI
+  action.
 * **No audit trail for role changes.** Grants and revocations are not recorded
   in a separate table; `cass_user_roles.inserted_at` shows when a currently held
   role was granted, but a revoke leaves no row behind. An audit log belongs with
@@ -400,14 +403,16 @@ inherit its threat model:
   string that does not map to an existing atom is rejected (no atom interning
   from input), so a hostile `product_type` cannot widen the vocabulary.
 
-### Deleting an account is a database decision
+### Deleting an account can never orphan a catalog
 
-`on_delete: :restrict` means the database refuses to delete a user who still
-owns a product. `Cass.Accounts` has no `delete_user/1` today, so the constraint
-is currently a guard rail; when account deletion lands it must transfer or
-archive first. This is why ownership **transfer** is deferred rather than
-skipped: it is the operation that would have to be designed and authorized
-before deletion could be offered.
+`on_delete: :restrict` means the database refuses to hard-delete a user who
+still owns a product. Since Milestone 9, `Cass.Accounts.delete_user/1` is a
+**soft** delete, so the FK is never exercised; instead the context checks
+`Cass.Catalog.owns_any_product?/1` first and refuses with `{:error,
+:owns_products}`. Draft and archived products count, because ownership does not
+end when a product stops being served. This is why ownership **transfer** is
+deferred rather than skipped: it is the operation that would have to be designed
+and authorized before a seller with a catalog could leave.
 
 ## Orders and checkout (Milestone 5)
 
@@ -605,6 +610,55 @@ route, `/purchases/:id`, that shows a buyer how to use a purchase they hold.
 * **Unimplemented kinds fail closed.** A `:smm`, `:ai`, or `:manual` purchase is
   refused rather than handed a placeholder capability, so a partially built
   feature cannot appear to work.
+
+## Sellers and the account lifecycle (Milestone 9)
+
+This milestone adds the first surface where an ordinary account supplies
+free-text that is later shown to buyers, and the first path that ends an
+account. Both are small, and both fail closed.
+
+* **Applying cannot escalate.** `Cass.Vendors.save_profile/2` writes a profile
+  with a status derived from the caller's **own** roles (`Scope.vendor?`), never
+  from a parameter. `:status` and `:user_id` are absent from the profile
+  changeset's cast list, so a submitted `status: "approved"` or `user_id` is
+  ignored rather than obeyed — pinned by
+  `test/cass/vendors_test.exs`. A submitted status is not even an error; it is
+  dropped before validation, so there is no field to probe.
+* **Approval is one fixed capability.** `approve_profile/2` is admin-only
+  (`Scope.admin?/1`) and grants exactly `:vendor` to the profile's own
+  `user_id`, in the same transaction as the status change. There is no function
+  that grants a caller-named role or a caller-named account, so the "no
+  escalation path" rule of `Cass.Accounts` still holds; the admin dashboard is a
+  trusted action using the same grant function the CLI uses.
+* **Review reads are non-enumerable.** `list_profiles/1` returns `[]` and
+  `get_reviewable_profile/2` returns `nil` for a non-admin scope, and malformed
+  or unknown ids resolve to `nil`, so a non-admin reaching the context directly
+  or a tampered event id sees the same "no longer available" refusal as the rest
+  of the management surfaces.
+* **The public name is the only field that escapes.** `Cass.Vendors.public_name/1`
+  returns a display name only for an `:approved` profile, and the public product
+  query preloads `owner: :vendor_profile`; `business_name`, `bio`, and `website`
+  are never rendered to buyers. The admin surfaces render `website` as a link
+  with `rel="noopener noreferrer"`, and it is validated to be an absolute
+  http(s) URL before storage.
+* **Account deletion preserves receipts and erases credentials.** Deletion is a
+  soft delete: the row stays because orders, fulfillments, entitlements,
+  favorites, and roles reference it. In one transaction it stamps `deleted_at`,
+  replaces the email with `deleted-<id>@cass.invalid` (RFC 2606 reserves
+  `.invalid`, so it is non-routable and non-deliverable), replaces the password
+  hash with a random secret, and deletes every token. `User.deleted?/1` and a
+  `is_nil(user.deleted_at)` clause in `verify_session_token_query/1` mean a
+  deactivated account is refused at login and resolves from no surviving
+  session. The confirmation step requires typing the account's own address, so a
+  stray click or a CSRF-shaped POST cannot delete it.
+* **A catalog blocks deletion.** An account that still owns any product
+  (draft, published, or archived) is refused with `{:error, :owns_products}`
+  before any write, so a seller's published work cannot be silently orphaned.
+* **Sessions are addressed by id, never by value.** `list_user_sessions/1`,
+  `revoke_user_session/2`, and `delete_user_sessions/1` operate on token row
+  ids; the revoke scopes the delete by `user_id`, so naming another account's
+  session id is a no-op. The settings page renders the id and the sign-in time,
+  never the token value.
 
 ## Input handling conventions (for future features)
 

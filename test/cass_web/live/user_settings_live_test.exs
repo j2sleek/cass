@@ -5,8 +5,11 @@ defmodule CassWeb.UserSettingsLiveTest do
   use CassWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
+  import Cass.CommerceFixtures, only: [category_fixture: 0]
 
   alias Cass.Accounts
+  alias Cass.Accounts.Scope
+  alias Cass.Catalog
   alias Cass.Repo
 
   setup %{conn: conn} do
@@ -177,5 +180,110 @@ defmodule CassWeb.UserSettingsLiveTest do
       assert html =~ "does not match password"
       assert Accounts.get_user_by_email_and_password(user.email, valid_user_password())
     end
+  end
+
+  describe "sessions" do
+    test "lists where the account is signed in and marks this device", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      [session] = Accounts.list_user_sessions(user)
+      assert has_element?(view, "#session-#{session.id}")
+      assert has_element?(view, "#session-#{session.id}", "This device")
+      # The current session cannot be revoked from the list.
+      refute has_element?(view, "#revoke-session-#{session.id}")
+    end
+
+    test "revokes another session but keeps this one", %{conn: conn, user: user} do
+      other_token = Accounts.generate_user_session_token(user)
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      other = Enum.find(Accounts.list_user_sessions(user), &(&1.token == other_token))
+      assert has_element?(view, "#revoke-session-#{other.id}")
+
+      view
+      |> element("#revoke-session-#{other.id}")
+      |> render_click()
+
+      refute Accounts.get_user_by_session_token(other_token)
+      assert Accounts.get_user_by_session_token(get_session(conn, :user_token))
+      refute has_element?(view, "#session-#{other.id}")
+    end
+
+    test "signs out everywhere and returns to the login page", %{conn: conn, user: user} do
+      other_token = Accounts.generate_user_session_token(user)
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      result =
+        view
+        |> element("#sign-out-everywhere")
+        |> render_click()
+
+      assert {:error, {:live_redirect, %{to: "/users/log-in"}}} = result
+      assert Accounts.list_user_sessions(user) == []
+      refute Accounts.get_user_by_session_token(other_token)
+      refute Accounts.get_user_by_session_token(get_session(conn, :user_token))
+    end
+  end
+
+  describe "deleting the account" do
+    test "refuses a confirmation that does not match the address", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      html =
+        view
+        |> form("#delete-account-form", user: %{confirmation: "not-my-address@example.com"})
+        |> render_submit()
+
+      assert html =~ "does not match your account"
+      refute Repo.get!(Accounts.User, user.id).deleted_at
+    end
+
+    test "deactivates the account on a matching address and returns home", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      result =
+        view
+        |> form("#delete-account-form", user: %{confirmation: user.email})
+        |> render_submit()
+
+      assert {:error, {:live_redirect, %{to: "/"}}} = result
+      assert Repo.get!(Accounts.User, user.id).deleted_at
+      refute Accounts.get_user_by_email_and_password(user.email, valid_user_password())
+    end
+
+    test "refuses to delete an account that still owns products", %{conn: conn, user: user} do
+      Scope.for_user(user) |> create_owned_product()
+
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      html =
+        view
+        |> form("#delete-account-form", user: %{confirmation: user.email})
+        |> render_submit()
+
+      assert html =~ "still owns products"
+      refute Repo.get!(Accounts.User, user.id).deleted_at
+    end
+  end
+
+  # Grants `:vendor` to the scope's account and creates one owned product, so
+  # account deletion has something to refuse.
+  defp create_owned_product(scope) do
+    unique = System.unique_integer([:positive])
+    :ok = Accounts.grant_user_role(scope.user, :vendor)
+
+    {:ok, _product} =
+      Catalog.create_owned_product(Scope.for_user(scope.user), category_fixture(), %{
+        name: "Widget #{unique}",
+        slug: "widget-#{unique}",
+        product_type: :digital,
+        visibility: :unlisted
+      })
   end
 end

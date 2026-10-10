@@ -69,13 +69,16 @@ defmodule Cass.Accounts.UserToken do
   @doc """
   Checks if the session token is valid and returns its underlying lookup query.
 
-  The query returns `{user, token_inserted_at}` when the token is still valid.
+  The query returns `{user, token_inserted_at}` when the token is still valid. A
+  deactivated account (`cass_users.deleted_at` set) is excluded, so a session
+  that survived the deletion transaction can never resolve to a live user.
   """
   def verify_session_token_query(token) do
     query =
       from token in by_token_and_context_query(token, "session"),
         join: user in assoc(token, :user),
         where: token.inserted_at > ago(@session_validity_in_days, "day"),
+        where: is_nil(user.deleted_at),
         select: {user, token.inserted_at}
 
     {:ok, query}

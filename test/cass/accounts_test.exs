@@ -6,9 +6,11 @@ defmodule Cass.AccountsTest do
   use Cass.DataCase, async: true
 
   import Cass.AccountsFixtures
+  import Cass.CommerceFixtures, only: [category_fixture: 0]
 
   alias Cass.Accounts
-  alias Cass.Accounts.{User, UserToken}
+  alias Cass.Accounts.{Scope, User, UserToken}
+  alias Cass.Catalog
 
   describe "register_user/1" do
     test "requires email and password to be set" do
@@ -582,6 +584,135 @@ defmodule Cass.AccountsTest do
     end
   end
 
+  describe "delete_user/1" do
+    test "deactivates the account, scrubs credentials, and revokes every token" do
+      user = user_fixture()
+      session_token = Accounts.generate_user_session_token(user)
+      confirm_token = Accounts.generate_user_confirmation_token(user)
+
+      assert {:ok, {deleted, revoked}} = Accounts.delete_user(user)
+
+      assert %DateTime{} = deleted.deleted_at
+      assert deleted.email == "deleted-#{user.id}@cass.invalid"
+      assert User.deleted?(deleted)
+
+      # The old credentials are gone, but the account row and its history remain.
+      refute User.valid_password?(deleted, valid_user_password())
+      assert Repo.get!(User, user.id).deleted_at
+
+      refute Accounts.get_user_by_email(user.email)
+      refute Accounts.get_user_by_email_and_password(user.email, valid_user_password())
+      refute Accounts.get_user_by_session_token(session_token)
+      assert {:error, :invalid_token} = Accounts.confirm_user(confirm_token)
+
+      assert Enum.any?(revoked, &(&1.token == session_token))
+      assert Accounts.list_user_sessions(user) == []
+    end
+
+    test "refuses an account that still owns a product and changes nothing" do
+      vendor = vendor_fixture()
+      category = category_fixture()
+
+      {:ok, _product} =
+        Catalog.create_owned_product(Scope.for_user(vendor), category, product_attrs())
+
+      assert {:error, :owns_products} = Accounts.delete_user(vendor)
+
+      assert is_nil(Repo.get!(User, vendor.id).deleted_at)
+      assert Accounts.get_user_by_email_and_password(vendor.email, valid_user_password())
+    end
+
+    test "an account with no products is allowed to leave" do
+      user = user_fixture()
+
+      assert {:ok, {_deleted, _tokens}} = Accounts.delete_user(user)
+      assert Repo.get!(User, user.id).deleted_at
+    end
+
+    test "an archived or draft product still blocks deletion" do
+      vendor = vendor_fixture()
+      category = category_fixture()
+
+      {:ok, product} =
+        Catalog.create_owned_product(Scope.for_user(vendor), category, product_attrs())
+
+      {:ok, _archived} = Catalog.archive_product(Scope.for_user(vendor), product)
+
+      assert {:error, :owns_products} = Accounts.delete_user(vendor)
+    end
+  end
+
+  describe "session management" do
+    setup do
+      %{user: user_fixture()}
+    end
+
+    test "list_user_sessions/1 returns the account's sessions, newest first", %{user: user} do
+      first = Accounts.generate_user_session_token(user)
+      second = Accounts.generate_user_session_token(user)
+      other = user_fixture()
+      Accounts.generate_user_session_token(other)
+
+      sessions = Accounts.list_user_sessions(user)
+
+      assert length(sessions) == 2
+      assert Enum.map(sessions, & &1.token) == [second, first]
+      assert Enum.all?(sessions, &(&1.context == "session"))
+      assert Enum.all?(sessions, &(&1.user_id == user.id))
+    end
+
+    test "list_user_sessions/1 ignores non-session tokens", %{user: user} do
+      Accounts.generate_user_session_token(user)
+      Accounts.generate_user_confirmation_token(user)
+
+      assert [%UserToken{context: "session"}] = Accounts.list_user_sessions(user)
+    end
+
+    test "revoke_user_session/2 ends only the named session", %{user: user} do
+      token = Accounts.generate_user_session_token(user)
+      other_token = Accounts.generate_user_session_token(user)
+
+      [session, _] = Accounts.list_user_sessions(user)
+
+      assert :ok = Accounts.revoke_user_session(user, session.id)
+      assert Accounts.get_user_by_session_token(token)
+      refute Accounts.get_user_by_session_token(other_token)
+    end
+
+    test "revoke_user_session/2 cannot end another account's session", %{user: user} do
+      other = user_fixture()
+      other_token = Accounts.generate_user_session_token(other)
+      [other_session] = Accounts.list_user_sessions(other)
+
+      assert :ok = Accounts.revoke_user_session(user, other_session.id)
+      assert Accounts.get_user_by_session_token(other_token)
+    end
+
+    test "revoke_user_session/2 is a no-op for malformed ids", %{user: user} do
+      token = Accounts.generate_user_session_token(user)
+
+      assert :ok = Accounts.revoke_user_session(user, "not-a-number")
+      assert :ok = Accounts.revoke_user_session(user, 0)
+      assert Accounts.get_user_by_session_token(token)
+    end
+
+    test "delete_user_sessions/1 ends every session of the account, only that account", %{
+      user: user
+    } do
+      token = Accounts.generate_user_session_token(user)
+      other_token = Accounts.generate_user_session_token(user)
+      other = user_fixture()
+      untouched = Accounts.generate_user_session_token(other)
+
+      assert :ok = Accounts.delete_user_sessions(user)
+
+      refute Accounts.get_user_by_session_token(token)
+      refute Accounts.get_user_by_session_token(other_token)
+      assert Accounts.get_user_by_session_token(untouched)
+      assert Accounts.list_user_sessions(user) == []
+    end
+  end
+
   # Captures the token out of the URL the notifier was handed, so the tests can
   # assert on what was actually delivered.
   defp extract_user_token(fun) do
@@ -599,5 +730,16 @@ defmodule Cass.AccountsTest do
       from(t in UserToken, where: t.user_id == ^user_id and t.context in ^contexts),
       set: [inserted_at: DateTime.add(DateTime.utc_now(:second), -30, :day)]
     )
+  end
+
+  defp product_attrs do
+    unique = System.unique_integer([:positive])
+
+    %{
+      name: "Widget #{unique}",
+      slug: "widget-#{unique}",
+      product_type: :digital,
+      visibility: :unlisted
+    }
   end
 end

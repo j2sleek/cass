@@ -353,16 +353,21 @@ function to stamp `published_at` for scheduling tests.
 | `email`       | string      | Required, ≤160 chars, stored trimmed and downcased |
 | `hashed_password` | string  | PBKDF2-HMAC-SHA512, redacted in the schema |
 | `confirmed_at`| utc_datetime | Null until the emailed link is opened     |
+| `deleted_at`  | utc_datetime | Null until the account is deactivated (Milestone 9) |
 | `inserted_at` / `updated_at` | utc_datetime | |
 
-Index: unique `lower(email)` (`cass_users_email_index`). Uniqueness is enforced
+Indexes: unique `lower(email)` (`cass_users_email_index`); a plain index on
+`deleted_at` for the "live accounts" filter. Uniqueness is enforced
 at the database level **and** pre-checked in the changeset for a friendly error
 message. Canonicalization happens in the changeset, so an address is stored in
 exactly one form and cannot be registered twice with different casing.
 
-There are deliberately **no** `role`, `is_vendor`, `owns_*`, or profile columns
+There are deliberately **no** `role`, `is_vendor`, or `owns_*` columns
 on `cass_users`: roles live in a join table (below) so an account can hold more
-than one, and ownership does not exist yet (see [security.md](security.md)).
+than one, and ownership is a fact about a product, not a column here. The seller
+profile lives in `cass_vendor_profiles` (below). The single profile-ish column,
+`deleted_at`, is a lifecycle flag rather than a role: it marks a deactivated
+account and is what the login and session lookups gate on.
 
 ### `cass_users_tokens`
 
@@ -426,6 +431,69 @@ The vocabulary is owned by `Cass.Accounts.UserRole.roles/0` (`[:admin,
 :vendor]`) and mirrored by the check constraint. Adding a role therefore needs
 a migration, not just a code change — the same discipline the Phase 1 token
 contexts use.
+
+## Sellers and account lifecycle (Milestone 9)
+
+### `cass_vendor_profiles`
+
+| Column          | Type         | Notes                                   |
+| --------------- | ------------ | --------------------------------------- |
+| `id`            | bigint       | PK                                      |
+| `user_id`       | bigint       | FK `cass_users` (`on_delete: :restrict`), **unique** |
+| `display_name`  | string       | Required, 2–60 chars; the public seller name |
+| `business_name` | string       | Optional, ≤120 chars                    |
+| `bio`           | string       | Optional, ≤500 chars                    |
+| `website`       | string       | Optional, ≤200 chars, absolute http(s) URL |
+| `status`        | string       | `pending` \| `approved` \| `rejected`   |
+| `inserted_at` / `updated_at` | utc_datetime | |
+
+Indexes: unique `[user_id]` (`cass_vendor_profiles_user_id_index`) and a plain
+index on `[status]` for the review queue. A CHECK constraint
+(`cass_vendor_profiles_status_check`) restricts `status` to the three-value
+vocabulary, mirroring `Cass.Vendors.VendorProfile.statuses/0`.
+
+Design notes:
+
+* **Optional, and at most one.** Most accounts never have a profile; the unique
+  `user_id` makes it one per account, which lets `save_profile/2` be an
+  idempotent `insert_or_update` and keeps `public_name/1` unambiguous.
+* **Two jobs in one row.** It is both the **onboarding application** (`status`,
+  the seller's reviewable text) and the **public seller identity**
+  (`display_name`). Only `:approved` profiles contribute a public name; the
+  other three fields never reach the storefront.
+* **The status is not owner-writable.** `:status` and `:user_id` are absent from
+  `VendorProfile.changeset/2`'s cast list; `Cass.Vendors.save_profile/2` derives
+  the status from the caller's roles and writes `scope.user.id`, and an admin
+  decision applies `status_changeset/2`, which changes only the status. No form
+  parameter can approve a profile or claim a different account.
+* **`on_delete: :restrict`.** A profile is protected history, like ownership and
+  orders. Account deletion is a soft delete (below), so the FK is never
+  exercised, but it keeps a direct hard delete from silently discarding a
+  seller's reviewed identity.
+* **Approval grants the role, in one transaction.** `Cass.Vendors.approve_profile/2`
+  updates the status and calls `Cass.Accounts.grant_user_role/2` inside the same
+  `Repo.transact/1`, so a profile can never be marked `:approved` without the
+  `:vendor` role that lets the account act as a seller. This is the only
+  application path that grants a role besides the bootstrap CLI.
+
+### Account deletion (soft)
+
+`cass_users.deleted_at` marks a deactivated account. `Cass.Accounts.delete_user/1`
+never removes the row — order, fulfillment, entitlement, favorite, and role rows
+all reference the account and must survive as receipts. Instead, in one
+transaction it:
+
+* stamps `deleted_at` (so login and the session lookup refuse the account),
+* replaces the email with `deleted-<id>@cass.invalid` (`.invalid` is reserved by
+  RFC 2606, so the address can never receive mail) to free the real address,
+* replaces `hashed_password` with the hash of a random 32-byte secret, so the
+  old password can never verify, and
+* deletes every token row for the account.
+
+An account that still owns a product is refused with `{:error, :owns_products}`
+before any write: a catalog is a seller's published work and must not be
+silently orphaned. Transferring or archiving ownership is future work, so today
+a seller must own nothing before it can leave.
 
 ## Business rules (implemented in `Cass.Catalog` and `Cass.Accounts`)
 
@@ -585,6 +653,17 @@ contexts use.
   concurrently.
 * Failed validation never consumes a token: a rejected reset attempt leaves the
   link usable.
+* Sessions can be listed (`list_user_sessions/1`), revoked one at a time
+  (`revoke_user_session/2`, scoped by `user_id` so it cannot touch another
+  account), or all at once (`delete_user_sessions/1`). The settings page renders
+  a session's row id and sign-in time, never its token value.
+* Deletion is a **soft** deactivation in one transaction: `deleted_at` is
+  stamped, the email is replaced with a non-routable `deleted-<id>@cass.invalid`
+  address, the password hash is replaced with a random secret, and every token is
+  deleted. `get_user_by_email/1` and the session-token query both exclude a
+  `deleted_at` account, so it can neither log in nor resolve from a surviving
+  session. An account that still owns a product is refused with
+  `{:error, :owns_products}` before any write.
 
 ### Roles and authorization
 
@@ -603,9 +682,11 @@ contexts use.
 * Roles are read from this table whenever a `Cass.Accounts.Scope` is built, so a
   revoke takes effect on the next request or LiveView mount rather than when a
   session expires.
-* There is no self-service grant path in this phase: the only way to obtain a
-  role is `mix cass.accounts.create_admin` or application code calling the
-  context. No HTTP route grants roles.
+* There is no path that grants a caller-named role: the only ways to obtain one
+  are `mix cass.accounts.create_admin`, application code calling the context, or
+  an admin approving a vendor application (`Cass.Vendors.approve_profile/2`),
+  which grants the fixed `:vendor` role to the application's own account. An
+  approval names an application, never a role or an account, so the rule holds.
 
 ## Planned schema (roadmap)
 
@@ -625,14 +706,19 @@ contexts use.
 * A delivery-attached provider-state table — a real object key, an upstream
   order id, a provider response, retry bookkeeping — reserved on
   `Cass.Fulfillment.Fulfillment` for the first provider that needs it.
-* Vendor onboarding (the `vendor` profile/business columns). Roles already exist
-  (`cass_user_roles`) and product ownership exists (`cass_products.owner_id`), so
-  onboarding has to add neither a role system nor an ownership column.
+* ~~Vendor onboarding (the `vendor` profile/business columns).~~ Implemented in
+  Milestone 9 as `cass_vendor_profiles`: one optional profile per account,
+  doubling as the onboarding application (`status`) and the public seller
+  identity (`display_name`). It needed neither a new role system nor an
+  ownership column, which already existed.
 * **Ownership transfer** is deliberately not planned as a column change. When it
   is designed, the `on_delete: :restrict` FK is the forcing function: deleting an
-  account that owns products must be refused or explicitly resolved first.
-* An account-deletion or credential-history table, if a later hardening phase
-  needs one.
+  account that owns products must be refused or explicitly resolved first. It is
+  the only thing standing between a seller and account deletion.
+* A credential-history / deletion-audit table, if a later hardening phase needs
+  one. Milestone 9 deliberately chose a **soft** delete (`cass_users.deleted_at`
+  plus credential scrubbing) over such a table, because the account row must
+  survive as the anchor for orders, entitlements, and favorites.
 
 ## Design decisions
 
@@ -652,8 +738,13 @@ contexts use.
 * **Snapshot-only order items.** Names, SKU, price, currency, quantity, and
   `metadata` (the variant's `config`) are copied at checkout and never
   re-derived, so catalog edits cannot silently rewrite a receipt.
-* **Soft deletion** is avoided in favor of `status`/`archived_at` so history
-  stays intact; archived rows remain queryable by the context.
+* **Soft deletion is a per-entity decision.** Catalog rows avoid it in favor of
+  `status`/`archived_at`, so history stays intact and archived rows remain
+  queryable by the context. An **account**, by contrast, is soft-deleted
+  (`cass_users.deleted_at`) precisely because so much history references it:
+  orders, fulfillments, entitlements, and favorites must survive, so the row is
+  deactivated and its credentials scrubbed rather than removed (see the account
+  lifecycle section above).
 * **Timestamps** use `:utc_datetime` per project convention (with the
   truncation rule above).
 * The marketplace is **single-schema** (one database); multi-tenancy is

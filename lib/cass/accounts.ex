@@ -58,6 +58,10 @@ defmodule Cass.Accounts do
   @doc """
   Gets a user by email address (case-insensitive), or `nil`.
 
+  A deactivated account is never returned: deletion scrubs the address, so this
+  is doubly safe, but the `deleted_at` filter makes the exclusion explicit and
+  independent of how the address was rewritten.
+
   ## Examples
 
       iex> get_user_by_email("foo@example.com")
@@ -68,7 +72,11 @@ defmodule Cass.Accounts do
 
   """
   def get_user_by_email(email) when is_binary(email) do
-    Repo.get_by(User, email: User.normalize_email(email))
+    from(u in User,
+      where: u.email == ^User.normalize_email(email),
+      where: is_nil(u.deleted_at)
+    )
+    |> Repo.one()
   end
 
   @doc """
@@ -519,6 +527,126 @@ defmodule Cass.Accounts do
   end
 
   def delete_user_session_token(_token), do: :ok
+
+  @doc """
+  Lists the live session tokens of a user, newest first.
+
+  Used by the settings page to show where the account is signed in. The
+  returned `%UserToken{}` structs carry the raw session token; callers must not
+  render it, only use it to identify the current session server-side. A
+  deactivated account has no sessions to list.
+  """
+  @spec list_user_sessions(User.t()) :: [UserToken.t()]
+  def list_user_sessions(%User{id: user_id}) do
+    from(t in UserToken,
+      where: t.user_id == ^user_id and t.context == "session",
+      order_by: [desc: t.inserted_at, desc: t.id]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Revokes one session of `user`, identified by its token row id.
+
+  The id is scoped to the user in the delete, so a caller cannot end another
+  account's session by naming its id. An unknown or malformed id is a no-op.
+  """
+  @spec revoke_user_session(User.t(), term()) :: :ok
+  def revoke_user_session(%User{id: user_id}, session_id) do
+    case session_id(session_id) do
+      nil ->
+        :ok
+
+      id ->
+        Repo.delete_all(
+          from t in UserToken,
+            where: t.id == ^id and t.user_id == ^user_id and t.context == "session"
+        )
+
+        :ok
+    end
+  end
+
+  @doc """
+  Revokes every session of `user`, signing it out on all devices.
+  """
+  @spec delete_user_sessions(User.t()) :: :ok
+  def delete_user_sessions(%User{id: user_id}) do
+    Repo.delete_all(from t in UserToken, where: t.user_id == ^user_id and t.context == "session")
+    :ok
+  end
+
+  ## Account deletion
+
+  @doc """
+  Deletes (deactivates) an account.
+
+  Deletion is deliberately a **soft delete**. Orders, fulfillments,
+  entitlements, favorites, and the account's roles all reference the account and
+  must survive as history, so the row stays and `deleted_at` is stamped instead.
+  In the same transaction the account's credentials are erased and every token is
+  revoked:
+
+    * the email address is replaced with a non-routable placeholder, freeing the
+      original address and removing the last piece of login PII;
+    * the password hash is replaced with the hash of a random secret, so the old
+      password can never verify again;
+    * every session, confirmation, and reset token is deleted.
+
+  An account that still **owns a product** is refused with
+  `{:error, :owns_products}`: a catalog is a seller's published work and must
+  not be silently orphaned. Transferring or archiving ownership is future work
+  (see the roadmap), so at present a seller account cannot be deleted until it
+  owns nothing.
+
+  Returns `{:ok, {user, revoked_tokens}}` on success, so the caller can
+  disconnect the LiveView sockets that were using the revoked tokens, or
+  `{:error, :owns_products}`.
+  """
+  @spec delete_user(User.t()) ::
+          {:ok, {User.t(), [UserToken.t()]}} | {:error, :owns_products}
+  def delete_user(%User{} = user) do
+    if Cass.Catalog.owns_any_product?(user) do
+      {:error, :owns_products}
+    else
+      deactivate_user(user)
+    end
+  end
+
+  defp deactivate_user(%User{} = user) do
+    Repo.transact(fn ->
+      tokens = Repo.all(from t in UserToken, where: t.user_id == ^user.id)
+
+      with {:ok, user} <-
+             user
+             |> Ecto.Changeset.change(
+               deleted_at: DateTime.utc_now(:second),
+               email: deleted_email(user.id),
+               hashed_password: Pbkdf2.hash_pwd_salt(random_secret())
+             )
+             |> Repo.update() do
+        Repo.delete_all(from t in UserToken, where: t.user_id == ^user.id)
+        {:ok, {user, tokens}}
+      end
+    end)
+  end
+
+  # RFC 2606 reserves `.invalid`, so this address can never receive mail and
+  # need not be unique across accounts for correctness — the id guarantees it is.
+  defp deleted_email(user_id), do: "deleted-#{user_id}@cass.invalid"
+
+  defp random_secret, do: :crypto.strong_rand_bytes(32)
+
+  defp session_id(session_id) when is_integer(session_id), do: session_id
+
+  defp session_id(session_id) when is_binary(session_id) do
+    case Integer.parse(session_id) do
+      {session_id, ""} -> session_id
+      _not_a_number -> nil
+    end
+  end
+
+  defp session_id(_session_id), do: nil
 
   ## Password reset
 

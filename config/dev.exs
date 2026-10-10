@@ -1,6 +1,9 @@
 import Config
 
-# Configure your database
+# Configure your database. `DATABASE_URL`, when set, points development at a
+# remote database and takes precedence over the localhost defaults below.
+database_url = System.get_env("DATABASE_URL")
+
 config :cass, Cass.Repo,
   username: "postgres",
   password: "postgres",
@@ -9,6 +12,18 @@ config :cass, Cass.Repo,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
+
+if database_url not in [nil, ""] do
+  config :cass, Cass.Repo, url: database_url, maintenance_database: "defaultdb"
+
+  # Ecto's URL parser only recognises `ssl=true`, so translate the `sslmode`
+  # parameter that managed providers (such as Aiven) put in `DATABASE_URL`.
+  # The host's certificate authority is not in this environment's trust store,
+  # so peer verification is disabled for local development only.
+  if database_url =~ ~r/[?&]sslmode=(require|verify-ca|verify-full)/ do
+    config :cass, Cass.Repo, ssl: [verify: :verify_none]
+  end
+end
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

@@ -12,13 +12,49 @@ config :cass, Cass.Analytics, writer: false
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
+#
+# `DATABASE_URL`, when set, points the suite at a remote PostgreSQL (for
+# environments without a local server) and takes precedence over the localhost
+# defaults below. Its database name is rewritten to `cass_test` so the suite can
+# never be pointed at the `cass_dev` database that the URL names in development.
+database_url = System.get_env("DATABASE_URL")
+
 config :cass, Cass.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
   database: "cass_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size:
+    String.to_integer(System.get_env("POOL_SIZE") || "#{System.schedulers_online() * 2}"),
+  # The default queue targets assume a local socket; over a managed remote
+  # database every statement pays network latency, so a burst of parallel
+  # preloads trips the 50ms target and starts dropping checkouts. Widening the
+  # window keeps the suite deterministic without changing localhost timing.
+  queue_target: 5_000,
+  queue_interval: 10_000
+
+if database_url not in [nil, ""] do
+  test_database = "cass_test#{System.get_env("MIX_TEST_PARTITION")}"
+
+  test_url =
+    database_url
+    |> URI.parse()
+    |> Map.put(:path, "/#{test_database}")
+    |> URI.to_string()
+
+  # Aiven has no `postgres` maintenance database; `defaultdb` is the one
+  # `ecto.create` must connect to in order to inspect or create `cass_test`.
+  config :cass, Cass.Repo, url: test_url, maintenance_database: "defaultdb"
+
+  # Ecto's URL parser only recognises `ssl=true`, so translate the `sslmode`
+  # parameter that managed providers (such as Aiven) put in `DATABASE_URL`. The
+  # host's certificate authority is not in this environment's trust store, so
+  # peer verification is disabled for the test run only.
+  if database_url =~ ~r/[?&]sslmode=(require|verify-ca|verify-full)/ do
+    config :cass, Cass.Repo, ssl: [verify: :verify_none]
+  end
+end
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

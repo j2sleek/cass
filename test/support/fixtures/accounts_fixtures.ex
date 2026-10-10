@@ -11,6 +11,8 @@ defmodule Cass.AccountsFixtures do
   """
 
   alias Cass.Accounts
+  alias Cass.Accounts.Scope
+  alias Cass.Vendors
 
   def unique_user_email, do: "user#{System.unique_integer([:positive])}@example.com"
   def valid_user_email, do: "test@example.com"
@@ -85,4 +87,42 @@ defmodule Cass.AccountsFixtures do
 
   @doc "Returns a new vendor."
   def vendor_fixture(attrs \\ %{}), do: user_with_role_fixture(:vendor, attrs)
+
+  @doc "Returns a fresh, unique seller display name."
+  def unique_vendor_display_name,
+    do: "Vendor #{System.unique_integer([:positive])}"
+
+  @doc """
+  Returns a seller profile for `user` (default: a fresh account), created
+  through `Cass.Vendors.save_profile/2`.
+
+  Because the fixture goes through the real write path, the status follows the
+  account's roles exactly as the application does: a `:vendor` account's profile
+  is `:approved`, and everybody else's is `:pending`. Pass profile text such as
+  `%{display_name: "Ada's Shop"}` to override the generated name.
+  """
+  def vendor_profile_fixture(user \\ nil, attrs \\ %{}) do
+    user = user || user_fixture()
+    scope = Scope.for_user(user)
+
+    attrs = Enum.into(attrs, %{display_name: unique_vendor_display_name()})
+
+    {:ok, profile} = Vendors.save_profile(scope, attrs)
+    profile
+  end
+
+  @doc """
+  Returns an `:approved` profile for `user` (default: a fresh account), driven
+  through the real admin approval path so the account also holds `:vendor`.
+
+  The returned profile has its `:user` preloaded.
+  """
+  def approved_vendor_profile_fixture(user \\ nil, attrs \\ %{}) do
+    user = user || user_fixture()
+    profile = vendor_profile_fixture(user, attrs)
+    admin = admin_fixture()
+
+    {:ok, approved} = Vendors.approve_profile(Scope.for_user(admin), profile)
+    Cass.Repo.preload(approved, :user)
+  end
 end

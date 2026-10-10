@@ -422,6 +422,41 @@ hand-off — without touching an ownership, expiry, or purchase-history fact.
   `refuse/0`, and the web layer renders all of them as the same page, so a
   probe cannot learn whether an id exists, whose it was, or why it failed.
 
+## Sellers and account lifecycle (Milestone 9)
+
+* **`Cass.Vendors` is the account-lifecycle counterpart to `Cass.Catalog`'s
+  ownership.** `Cass.Catalog` answers *whose* a product is and who may manage
+  it; `Cass.Vendors` answers what a seller is *called* and how an account
+  becomes one. The two share one seam: `public_name/1` reads an approved
+  profile, and the ownership checks are unchanged.
+* **A profile is both an application and an identity.** `cass_vendor_profiles`
+  holds one optional row per account. Its `status` (`:pending`/`:approved`/
+  `:rejected`) is the review state; its `display_name` is the public seller
+  name. `save_profile/2` derives the status from the caller's own roles and
+  writes `scope.user.id`, so the owner can write the row but never the status.
+* **Approval is the one application path that grants a role.** An admin acts on
+  `/admin/vendors`; `Cass.Vendors.approve_profile/2` changes the status and calls
+  `Cass.Accounts.grant_user_role(user, :vendor)` in one `Repo.transact/1`, so a
+  profile is never `:approved` without the role. It names an application, never
+  a role or an account, so `Cass.Accounts`'s "no escalation path" rule stands.
+* **The web surfaces are thin and guarded.** `/sell` (any signed-in account) is a
+  LiveView that only calls the context; `/admin/vendors` sits behind the
+  `:require_admin` plug and LiveView hook, and every event re-resolves its target
+  through `get_reviewable_profile/2` so a tampered id is inert. Both are
+  `noindex`.
+* **Account deletion is a soft delete owned by `Cass.Accounts`.**
+  `delete_user/1` refuses an account that still owns a product
+  (`Cass.Catalog.owns_any_product?/1`), then in one transaction stamps
+  `deleted_at`, scrubs the email and password hash, and deletes every token.
+  `User.deleted?/1` and the session-token query's `is_nil(user.deleted_at)`
+  clause make the account refusable at login and unsessionable. The settings
+  page performs it behind a type-your-own-address confirmation, and reports the
+  catalog refusal without changing anything.
+* **Session management is a read/write surface over the token table.**
+  `list_user_sessions/1`, `revoke_user_session/2`, and `delete_user_sessions/1`
+  address sessions by token row id, never by value, and the per-session revoke
+  is scoped by `user_id`.
+
 ## Saved items (favorites)
 
 * `Cass.Favorites` owns one table (`cass_favorites`) and one idea: the pair

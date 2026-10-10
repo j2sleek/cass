@@ -103,6 +103,15 @@ defmodule CassWeb.Layouts do
                 Insights
               </.link>
 
+              <.link
+                :if={Scope.admin?(@current_scope)}
+                navigate={~p"/admin/vendors"}
+                id="nav-admin-vendors"
+                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+              >
+                Vendors
+              </.link>
+
               <%!-- One place decides who sees the management link, and it is the
                     same predicate the Catalog context authorizes creation with,
                     so the nav can never advertise an area the context would
@@ -114,6 +123,14 @@ defmodule CassWeb.Layouts do
                 class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
               >
                 Manage products
+              </.link>
+
+              <.link
+                navigate={~p"/sell"}
+                id="nav-sell"
+                class="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-brand-700 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-brand-300"
+              >
+                Sell
               </.link>
 
               <.link
